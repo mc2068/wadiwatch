@@ -14,6 +14,7 @@ class EspClock : public wadiwatch::Clock {
 class UnconnectedRadio : public wadiwatch::Radio {
  public:
   void send(const uint8_t*, size_t) override {}
+  void setListening(bool) override {}
   size_t receive(uint8_t*, size_t) override { return 0; }
 };
 

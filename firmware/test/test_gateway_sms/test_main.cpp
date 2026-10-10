@@ -332,11 +332,13 @@ static void test_repeated_alert_packets_at_the_same_level_send_no_additional_sms
   letSmsGoOut(site);
   const size_t sentForTheTwoLevels = site.modem.sent().size();
   TEST_ASSERT_EQUAL_UINT(2 + 4, sentForTheTwoLevels);
-  TEST_ASSERT_EQUAL_UINT(1, alertsOnAirAt(site, AlertLevel::Warning));
+  const size_t warningsSoFar = alertsOnAirAt(site, AlertLevel::Warning);
+  TEST_ASSERT_TRUE(warningsSoFar >= 1);
 
-  // The alert stays in force for half an hour. Every few minutes the wadi node raises
-  // Warning again in a new packet, and every frame of the event so far (the earlier
-  // Watch among them) is transmitted again byte for byte.
+  // The alert stays in force for half an hour. The wadi node sends Warning again every
+  // re-send interval; on top of that, every few minutes it is power-cycled and raises
+  // Warning afresh, and every frame of the event so far (the earlier Watch among them)
+  // is transmitted again byte for byte.
   const size_t repeats = 5;
   for (size_t repeat = 0; repeat < repeats; ++repeat) {
     raiseAlertAgain(site);
@@ -347,7 +349,7 @@ static void test_repeated_alert_packets_at_the_same_level_send_no_additional_sms
 
   // The Warning went out again each time, in packets a receiver accepts, and nobody
   // was sent a second SMS for it.
-  TEST_ASSERT_EQUAL_UINT(1 + repeats, alertsOnAirAt(site, AlertLevel::Warning));
+  TEST_ASSERT_TRUE(alertsOnAirAt(site, AlertLevel::Warning) >= warningsSoFar + repeats);
   TEST_ASSERT_EQUAL_UINT(sentForTheTwoLevels, site.modem.sent().size());
 
   // Nor does a new Watch packet, heard while the Warning is in force, send anything.
@@ -627,29 +629,32 @@ static void test_readings_from_a_storm_that_raises_no_alert_send_no_sms() {
 }
 
 static void test_a_reading_that_carries_an_alert_level_is_not_an_alert() {
+  // At Watch: a Watch alert is sent once, so that from then on the alert level
+  // travels in the readings alone. (From Warning up the alert itself is sent again
+  // every re-send interval.)
   SmsSite site;
-  floodTo(site, AlertLevel::Warning);
+  floodTo(site, AlertLevel::Watch);
   letSmsGoOut(site);
-  TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(2, site.modem.sent().size());
 
   // The gateway is power-cycled and no longer knows of the event. The readings it hears
-  // from now on say Warning, which would be news to it; but only an alert packet is.
+  // from now on say Watch, which would be news to it; but only an alert packet is.
   site.restartGateway();
   const size_t readingsBefore = site.packetsOnAir(PacketKind::Reading).size();
   site.runMinutes(10);
 
   const std::vector<Packet> readings = site.packetsOnAir(PacketKind::Reading);
   TEST_ASSERT_TRUE(readings.size() > readingsBefore);
-  TEST_ASSERT_EQUAL_INT(static_cast<int>(AlertLevel::Warning),
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(AlertLevel::Watch),
                         static_cast<int>(readings.back().reading.alertLevel));
-  TEST_ASSERT_EQUAL_UINT(1, alertsOnAirAt(site, AlertLevel::Warning));
-  TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(1, alertsOnAirAt(site, AlertLevel::Watch));
+  TEST_ASSERT_EQUAL_UINT(2, site.modem.sent().size());
   TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
 
   // The next alert packet starts the event the gateway had forgotten.
-  floodTo(site, AlertLevel::Evacuate);
+  floodTo(site, AlertLevel::Warning);
   letSmsGoOut(site);
-  TEST_ASSERT_EQUAL_UINT(4 + 6, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(2 + 4, site.modem.sent().size());
 }
 
 // The wadi node transmits every alert several times and the siren node answers each
@@ -667,14 +672,16 @@ static void test_an_alert_transmitted_several_times_and_acknowledged_sends_each_
     letSmsGoOut(site);
   }
 
-  // Three alerts went out, each as many times as configured, and each was acknowledged.
+  // The three changes of level went out as alerts, and from Warning up the alert was
+  // sent again while it stayed in force. Each of them went out as many times as
+  // configured, and each was acknowledged.
   const std::vector<Frame> alerts = site.framesOnAir(PacketKind::Alert);
-  TEST_ASSERT_EQUAL_UINT(3, alerts.size());
+  TEST_ASSERT_TRUE(alerts.size() > 3);
   for (const Frame& alert : alerts) {
     TEST_ASSERT_EQUAL_UINT(transmissions, site.timesTransmitted(alert));
   }
   const std::vector<Packet> acknowledgements = site.packetsOnAir(PacketKind::Acknowledgement);
-  TEST_ASSERT_EQUAL_UINT(3, acknowledgements.size());
+  TEST_ASSERT_EQUAL_UINT(alerts.size(), acknowledgements.size());
   TEST_ASSERT_EQUAL_INT(static_cast<int>(AlertLevel::Evacuate),
                         static_cast<int>(acknowledgements.back().acknowledgement.alertLevel));
 
@@ -735,9 +742,11 @@ static void test_what_the_siren_node_transmits_sends_no_sms() {
   // The wadi node is lost. The siren node waits for a refresh, gives up, says so in a
   // heartbeat and goes on saying so every hour.
   site.unplugWadiNode();
+  const size_t acknowledged = site.packetsOnAir(PacketKind::Acknowledgement).size();
+  TEST_ASSERT_TRUE(acknowledged >= 1);
   site.runMs(static_cast<uint64_t>(sirenNode.alertRefreshTimeoutMs) + sirenNode.heartbeatIntervalMs);
 
-  TEST_ASSERT_EQUAL_UINT(1, site.packetsOnAir(PacketKind::Acknowledgement).size());
+  TEST_ASSERT_EQUAL_UINT(acknowledged, site.packetsOnAir(PacketKind::Acknowledgement).size());
   TEST_ASSERT_TRUE(sirenNodeHeartbeats(site).back().heartbeat.alertRefreshLost);
   TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
   TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());

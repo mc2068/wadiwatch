@@ -29,9 +29,9 @@ struct Row {
   AlertLevel expected;
 };
 
-// A calm wadi apart from its level: no rise, no rain, nothing heard from upstream.
+// A calm wadi apart from its level: no rise, no rain, nothing heard from upstream, no alert yet.
 AlertInputs levelOnly(float levelCm) {
-  const AlertInputs inputs = {levelCm, 0.0f, 0.0f, AlertLevel::None};
+  const AlertInputs inputs = {levelCm, 0.0f, 0.0f, AlertLevel::None, AlertLevel::None};
   return inputs;
 }
 
@@ -93,17 +93,77 @@ std::vector<RiseRow> riseRows(const AlertThresholds& thresholds) {
 void assertRise(const AlertThresholds& thresholds) {
   for (const RiseRow& row : riseRows(thresholds)) {
     const AlertInputs inputs = {row.levelCm, row.sustainedRateOfRiseCmPerMin, row.rainInWindowMm,
-                                AlertLevel::None};
+                                AlertLevel::None, AlertLevel::None};
     const AlertLevel actual = evaluateAlertLevel(inputs, thresholds);
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(row.expected),
                                     static_cast<uint8_t>(actual), row.description);
   }
 }
 
-// No rise and nothing heard from upstream.
+// No rise, nothing heard from upstream and no alert yet.
 AlertInputs levelAndRain(float levelCm, float rainInWindowMm) {
-  const AlertInputs inputs = {levelCm, 0.0f, rainInWindowMm, AlertLevel::None};
+  const AlertInputs inputs = {levelCm, 0.0f, rainInWindowMm, AlertLevel::None, AlertLevel::None};
   return inputs;
+}
+
+// What the upstream node's alert level calls for, together with this node's own
+// level and the alert level already in force here.
+struct UpstreamRow {
+  const char* description;
+  float levelCm;
+  AlertLevel alertLevelInForce;
+  AlertLevel upstreamAlertLevel;
+  AlertLevel expected;
+};
+
+std::vector<UpstreamRow> upstreamRows(const AlertThresholds& thresholds) {
+  const float watchCm = levelThresholdCm(thresholds, AlertLevel::Watch);
+  const float warningCm = levelThresholdCm(thresholds, AlertLevel::Warning);
+  const float evacuateCm = levelThresholdCm(thresholds, AlertLevel::Evacuate);
+  const AlertLevel none = AlertLevel::None;
+  const AlertLevel watch = AlertLevel::Watch;
+  const AlertLevel warning = AlertLevel::Warning;
+  const AlertLevel evacuate = AlertLevel::Evacuate;
+  return {
+      // Warning upstream alone raises nothing here.
+      {"dry bed, Warning upstream", 0.0f, none, warning, none},
+      {"dry bed, Evacuate upstream", 0.0f, none, evacuate, none},
+      {"just below Watch, Warning upstream", watchCm - kJustCm, none, warning, none},
+      {"at Watch, Warning upstream", watchCm, none, warning, watch},
+      {"at Watch, Evacuate upstream", watchCm, none, evacuate, watch},
+      {"just below Warning, Warning upstream", warningCm - kJustCm, none, warning, watch},
+      // Warning here needs Warning or above upstream to become Evacuate.
+      {"at Warning, nothing heard upstream", warningCm, none, none, warning},
+      {"at Warning, Watch upstream", warningCm, none, watch, warning},
+      {"at Warning, Warning upstream", warningCm, none, warning, evacuate},
+      {"at Warning, Evacuate upstream", warningCm, none, evacuate, evacuate},
+      {"just below Evacuate, Warning upstream", evacuateCm - kJustCm, none, warning, evacuate},
+      {"at Evacuate, nothing heard upstream", evacuateCm, none, none, evacuate},
+      {"at Evacuate, Warning upstream", evacuateCm, none, warning, evacuate},
+      // A Warning already in force here counts, wherever the level is by now.
+      {"Warning in force, level back on a dry bed, Warning upstream", 0.0f, warning, warning,
+       evacuate},
+      {"Warning in force, level at Watch, Evacuate upstream", watchCm, warning, evacuate, evacuate},
+      {"Warning in force, level at Warning, Warning upstream", warningCm, warning, warning,
+       evacuate},
+      {"Watch in force, level back on a dry bed, Warning upstream", 0.0f, watch, warning, none},
+      {"Watch in force, level at Watch, Warning upstream", watchCm, watch, warning, watch},
+      // Without the upstream node, the alert level in force changes nothing: the answer
+      // is what the readings call for now, and holding the alert is the caller's job.
+      {"Warning in force, dry bed, nothing heard upstream", 0.0f, warning, none, none},
+      {"Warning in force, dry bed, Watch upstream", 0.0f, warning, watch, none},
+      {"Evacuate in force, level at Watch, nothing heard upstream", watchCm, evacuate, none, watch},
+  };
+}
+
+void assertUpstream(const AlertThresholds& thresholds) {
+  for (const UpstreamRow& row : upstreamRows(thresholds)) {
+    const AlertInputs inputs = {row.levelCm, 0.0f, 0.0f, row.upstreamAlertLevel,
+                                row.alertLevelInForce};
+    const AlertLevel actual = evaluateAlertLevel(inputs, thresholds);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(row.expected),
+                                    static_cast<uint8_t>(actual), row.description);
+  }
 }
 
 std::vector<RainRow> rainRows(const AlertThresholds& thresholds) {
@@ -215,6 +275,32 @@ static void test_a_sustained_rate_of_rise_raises_warning_at_another_site() {
   assertRise(shallowCulvert());
 }
 
+static void test_warning_here_and_upstream_calls_for_evacuate_at_the_prototype_site() {
+  assertUpstream(wadiwatch::prototypeSite().wadiNode.alertThresholds);
+}
+
+static void test_warning_here_and_upstream_calls_for_evacuate_at_another_site() {
+  assertUpstream(shallowCulvert());
+}
+
+static void test_warning_by_rate_of_rise_is_confirmed_by_the_upstream_node_like_any_other() {
+  const AlertThresholds thresholds = shallowCulvert();
+  const float warningRate = thresholds.warningRateOfRiseCmPerMin;
+  // A fast rise on a low level, with Warning heard from upstream.
+  const AlertInputs rising = {0.0f, warningRate, 0.0f, AlertLevel::Warning, AlertLevel::None};
+  // The rise has stopped, the Warning it raised is still in force.
+  const AlertInputs risen = {0.0f, 0.0f, 0.0f, AlertLevel::Warning, AlertLevel::Warning};
+  const AlertInputs slowRise = {0.0f, warningRate - kJustCmPerMin, 0.0f, AlertLevel::Warning,
+                                AlertLevel::None};
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AlertLevel::Evacuate),
+                          static_cast<uint8_t>(evaluateAlertLevel(rising, thresholds)));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AlertLevel::Evacuate),
+                          static_cast<uint8_t>(evaluateAlertLevel(risen, thresholds)));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AlertLevel::None),
+                          static_cast<uint8_t>(evaluateAlertLevel(slowRise, thresholds)));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_level_thresholds_are_percentages_of_bank_full_depth);
@@ -224,5 +310,8 @@ int main(int, char**) {
   RUN_TEST(test_rain_in_the_window_raises_watch_at_another_site);
   RUN_TEST(test_a_sustained_rate_of_rise_raises_warning_at_the_prototype_site);
   RUN_TEST(test_a_sustained_rate_of_rise_raises_warning_at_another_site);
+  RUN_TEST(test_warning_here_and_upstream_calls_for_evacuate_at_the_prototype_site);
+  RUN_TEST(test_warning_here_and_upstream_calls_for_evacuate_at_another_site);
+  RUN_TEST(test_warning_by_rate_of_rise_is_confirmed_by_the_upstream_node_like_any_other);
   return UNITY_END();
 }

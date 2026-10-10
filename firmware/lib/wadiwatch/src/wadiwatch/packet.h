@@ -9,6 +9,8 @@
 namespace wadiwatch {
 
 using NodeId = uint16_t;
+// No node has this identifier: it stands for "none" wherever a node is optional.
+constexpr NodeId kNoNode = 0;
 
 enum class AlertLevel : uint8_t { None = 0, Watch = 1, Warning = 2, Evacuate = 3 };
 

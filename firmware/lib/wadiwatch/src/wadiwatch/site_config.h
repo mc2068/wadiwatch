@@ -1,4 +1,5 @@
-// Site configuration: the one place where node identifiers, thresholds and the site key are set.
+// Site configuration: the one place where node identifiers, upstream relationships,
+// thresholds, radio settings and the site key are set.
 #pragma once
 
 #include <cstddef>
@@ -9,8 +10,10 @@
 #include "wadiwatch/level_measurement.h"
 #include "wadiwatch/operating_mode.h"
 #include "wadiwatch/packet.h"
+#include "wadiwatch/radio_config.h"
 #include "wadiwatch/rain_window.h"
 #include "wadiwatch/rate_of_rise.h"
+#include "wadiwatch/upstream_link.h"
 
 namespace wadiwatch {
 
@@ -29,6 +32,11 @@ struct WadiNodeConfig {
   uint32_t heartbeatIntervalMs;
   // How each alert is repeated on the air.
   AlertRepeatConfig alertRepeat;
+  // Which wadi node is upstream of this one, and how long this one listens for it.
+  UpstreamConfig upstream;
+  // While at Warning or above, the node sends its alert again this long after it last
+  // sent it. Must be longer than an alert takes to go out all its times.
+  uint32_t alertResendIntervalMs;
 };
 
 struct SirenNodeConfig {
@@ -75,11 +83,16 @@ struct GatewayConfig {
 };
 
 struct SiteConfig {
+  // The site's two wadi nodes. Which one is upstream of the other is decided by
+  // `WadiNodeConfig::upstream`, not by these names: in the prototype the first has no
+  // upstream node and the second names the first.
   WadiNodeConfig wadiNode;
+  WadiNodeConfig downstreamWadiNode;
   SirenNodeConfig sirenNode;
   GatewayConfig gateway;
   // The shared key and the nodes that packets are accepted from.
   SiteAuth auth;
+  RadioConfig radio;
 };
 
 // The bench prototype. Values are starting points, to be calibrated per site.

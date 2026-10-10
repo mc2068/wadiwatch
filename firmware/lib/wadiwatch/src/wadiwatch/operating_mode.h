@@ -25,6 +25,10 @@ class ModeController {
   void onRain(uint64_t nowMs);
   // A level measurement was taken.
   void onLevel(uint64_t nowMs, bool atOrAboveWatchThreshold);
+  // The node has an alert that it sends again and again (Warning or above). It
+  // stays in storm mode for as long as it does, whatever the level and the rain;
+  // the quiet period starts when the alert ends.
+  void onAlertInForce(uint64_t nowMs);
 
   OperatingMode mode() const { return mode_; }
   // Time from one measurement to the next in the current mode.

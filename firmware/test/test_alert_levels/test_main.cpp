@@ -60,24 +60,13 @@ void holdLevel(TestSite& site, float levelCm) {
   }
 }
 
-// The flood has passed: the wadi stays dry for long enough that the node goes
-// back to dry mode and measures the dry bed more than once there.
-void stayDryPastTheReturnToDryMode(TestSite& site) {
+// The flood has passed: the wadi stays dry for longer than it takes a node with no
+// alert to go back to dry mode and measure the dry bed more than once there. A node
+// at Warning or above stays in storm mode and measures the dry bed every minute.
+void stayDryLongAfterTheFlood(TestSite& site) {
   const wadiwatch::OperatingModeConfig& mode = site.config.wadiNode.mode;
   site.levelSensor.setWaterLevelCm(0.0f);
   site.runMs(static_cast<uint64_t>(mode.stormQuietMs) + 2ull * mode.dryMeasureIntervalMs);
-}
-
-// A wadi node at Warning or above is to re-send its alert every minute (ticket #7),
-// and that re-send is what keeps a siren node sounding through a long event. Until
-// the wadi node does it, nothing refreshes the alert, so the scenarios that outlast
-// the siren node's refresh timeout give it a timeout longer than they are. Once the
-// re-send is in place they must pass on the plain prototype site: delete this then.
-SiteConfig siteWhoseSirenNodeOutwaitsTheScenario() {
-  SiteConfig config = wadiwatch::prototypeSite();
-  const wadiwatch::OperatingModeConfig& mode = config.wadiNode.mode;
-  config.sirenNode.alertRefreshTimeoutMs = 4u * (mode.stormQuietMs + 2u * mode.dryMeasureIntervalMs);
-  return config;
 }
 
 }  // namespace
@@ -205,7 +194,7 @@ static void test_warning_escalating_to_evacuate_changes_the_siren_to_continuous(
 }
 
 static void test_falling_level_does_not_lower_evacuate() {
-  TestSite site(siteWhoseSirenNodeOutwaitsTheScenario());
+  TestSite site;
   holdLevel(site, levelWithin(site, AlertLevel::Evacuate));
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
 
@@ -214,7 +203,7 @@ static void test_falling_level_does_not_lower_evacuate() {
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
   holdLevel(site, levelWithin(site, AlertLevel::Watch));
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
-  stayDryPastTheReturnToDryMode(site);
+  stayDryLongAfterTheFlood(site);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
@@ -222,10 +211,10 @@ static void test_falling_level_does_not_lower_evacuate() {
 }
 
 static void test_falling_level_does_not_lower_warning() {
-  TestSite site(siteWhoseSirenNodeOutwaitsTheScenario());
+  TestSite site;
   holdLevel(site, levelWithin(site, AlertLevel::Warning));
 
-  stayDryPastTheReturnToDryMode(site);
+  stayDryLongAfterTheFlood(site);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, site.latestAlertOnAir());
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());

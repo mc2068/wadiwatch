@@ -18,8 +18,9 @@ class SleepControl {
  public:
   virtual ~SleepControl() = default;
   // Asks to sleep for up to durationMs once the current tick returns.
-  // The device may wake sooner (a rain-gauge tip wakes the wadi node),
-  // so the next tick can come before the time is up.
+  // The device may wake sooner (a rain-gauge tip wakes the wadi node, and so does a
+  // frame arriving while its receiver is on), so the next tick can come before the
+  // time is up.
   virtual void requestSleepMs(uint64_t durationMs) = 0;
 };
 
@@ -63,6 +64,10 @@ class Radio {
  public:
   virtual ~Radio() = default;
   virtual void send(const uint8_t* data, size_t length) = 0;
+  // Switches the receiver on or off. A radio listens from power-on; a device that
+  // sleeps switches the receiver off to save energy, and on again for its receive
+  // windows. Frames sent by others while the receiver is off are lost.
+  virtual void setListening(bool listening) = 0;
   // Copies the next received frame into buffer and returns its length,
   // or 0 when nothing is waiting.
   virtual size_t receive(uint8_t* buffer, size_t capacity) = 0;
