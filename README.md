@@ -116,7 +116,7 @@ The scenario (`backend/scenarios/flood_demo.jsonl`) is synthetic until there is 
 
 The alert log at the bottom of the dashboard lists every alert, test and all clear, newest first, and is open to anyone who can open the dashboard. For each alert it shows which siren nodes acknowledged it and whether an officer has. One alert entry is one change of alert level at one wadi node; the refresh a node sends every minute does not add entries.
 
-Officers sign in to acknowledge an alert. While an Evacuate alert is in force and no officer has acknowledged it, the dashboard keeps a request for acknowledgement at the top of the page. The log shows everyone that an alert was acknowledged and when; the officer's account name is shown only to signed-in officers.
+Officers sign in to acknowledge an alert. While an Evacuate alert is in force and no officer has acknowledged it, the dashboard keeps a request for acknowledgement at the top of the window, in view wherever the page is scrolled to. The log shows everyone that an alert was acknowledged and when; the officer's account name is shown only to signed-in officers.
 
 Sign-in uses test accounts. Create them with the seed step, once, and again whenever the database file has been deleted:
 
