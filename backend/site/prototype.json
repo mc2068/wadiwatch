@@ -1,0 +1,35 @@
+{
+  "name": "Prototype site, Nabeul",
+  "positions_are_placeholders": true,
+  "gateway": {
+    "id": 769,
+    "name": "Gateway",
+    "lat": 36.4500,
+    "lon": 10.7372
+  },
+  "nodes": [
+    {
+      "id": 257,
+      "role": "wadi_node",
+      "name": "Wadi node 1 (upstream)",
+      "lat": 36.4720,
+      "lon": 10.7150,
+      "upstream": null
+    },
+    {
+      "id": 258,
+      "role": "wadi_node",
+      "name": "Wadi node 2 (downstream)",
+      "lat": 36.4608,
+      "lon": 10.7228,
+      "upstream": 257
+    },
+    {
+      "id": 513,
+      "role": "siren_node",
+      "name": "Siren node 1",
+      "lat": 36.4546,
+      "lon": 10.7288
+    }
+  ]
+}

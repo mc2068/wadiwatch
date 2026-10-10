@@ -1,0 +1,214 @@
+:root {
+  --ink: #14212b;
+  --ink-soft: #55636e;
+  --paper: #f4f6f7;
+  --card: #ffffff;
+  --line: #d9dfe3;
+  --bar: #10222e;
+
+  /* One colour per alert level, used by the map, the list and the legend. */
+  --none: #2b9348;
+  --watch: #f2b705;
+  --warning: #f26a0f;
+  --evacuate: #d1203a;
+  --silent: #8a959d;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+h1, h2, p, ul { margin: 0; padding: 0; }
+ul { list-style: none; }
+
+/* Top bar */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 18px;
+  color: #fff;
+  background: var(--bar);
+}
+
+.bar__title { margin-right: auto; }
+.bar h1 { font-size: 19px; letter-spacing: 0.02em; }
+.bar__title p { font-size: 13px; color: #b9c7d1; }
+
+.summary {
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.summary--unknown { background: #2a3f4d; color: #d5dfe5; }
+.summary--none { background: var(--none); color: #fff; }
+.summary--watch { background: var(--watch); color: var(--ink); }
+.summary--warning { background: var(--warning); color: #fff; }
+.summary--evacuate { background: var(--evacuate); color: #fff; }
+
+.connection { font-size: 13px; color: #b9c7d1; min-width: 150px; text-align: right; }
+.connection--lost { color: #ffd3d9; font-weight: 700; }
+
+/* Map and side panel */
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+.map { position: relative; min-height: 320px; }
+#map { position: absolute; inset: 0; background: #e3e8eb; }
+
+.map__unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.map__note {
+  position: absolute;
+  left: 12px;
+  bottom: 24px;
+  z-index: 500;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.panel {
+  overflow-y: auto;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+.nodes { margin-bottom: 22px; }
+
+.node {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--silent);
+  border-radius: 4px;
+  background: var(--card);
+}
+.node.level--none { border-left-color: var(--none); }
+.node.level--watch { border-left-color: var(--watch); }
+.node.level--warning { border-left-color: var(--warning); }
+.node.level--evacuate { border-left-color: var(--evacuate); }
+
+.node__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.node__name { font-weight: 600; }
+.node__role { font-size: 12px; color: var(--ink-soft); }
+
+.node__level {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--silent);
+}
+.level--none .node__level { background: var(--none); }
+.level--watch .node__level { background: var(--watch); color: var(--ink); }
+.level--warning .node__level { background: var(--warning); }
+.level--evacuate .node__level { background: var(--evacuate); }
+
+.node__reading { margin-top: 6px; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.node__reading small { font-size: 13px; font-weight: 400; color: var(--ink-soft); }
+.node__time { margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+
+.legend { margin-bottom: 14px; font-size: 13px; }
+.legend li { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+
+.swatch { width: 14px; height: 14px; border-radius: 3px; }
+.swatch.level--none { background: var(--none); }
+.swatch.level--watch { background: var(--watch); }
+.swatch.level--warning { background: var(--warning); }
+.swatch.level--evacuate { background: var(--evacuate); }
+.swatch.level--silent { background: var(--silent); }
+
+/* Markers: the shape says what the unit is, the colour says its alert level. */
+
+.pin {
+  display: block;
+  width: 26px;
+  height: 26px;
+  border: 3px solid #fff;
+  background: var(--silent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+.pin--wadi_node { border-radius: 50%; }
+.pin--siren_node { border-radius: 4px; transform: rotate(45deg) scale(0.86); }
+.pin--gateway {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+  border-radius: 2px;
+  background: var(--bar);
+}
+
+.pin.level--none { background: var(--none); }
+.pin.level--watch { background: var(--watch); }
+.pin.level--warning { background: var(--warning); }
+.pin.level--evacuate { background: var(--evacuate); animation: evacuate-pulse 1.2s ease-out infinite; }
+.pin.level--plain { background: #c5cdd2; }
+
+.legend .pin { flex: none; width: 14px; height: 14px; border-width: 2px; box-shadow: 0 0 0 1px var(--line); }
+.legend .pin--gateway { width: 11px; height: 11px; margin: 0 1.5px; }
+
+@keyframes evacuate-pulse {
+  0% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55), 0 0 0 0 rgba(209, 32, 58, 0.7); }
+  100% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55), 0 0 0 16px rgba(209, 32, 58, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pin.level--evacuate { animation: none; box-shadow: 0 0 0 5px rgba(209, 32, 58, 0.45); }
+}
+
+.leaflet-tooltip.node-label {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  font: 600 12px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+}
+.node-label b { text-transform: uppercase; letter-spacing: 0.04em; }
+
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); }
+  .bar { flex-wrap: wrap; gap: 8px 16px; }
+  .connection { min-width: 0; }
+}

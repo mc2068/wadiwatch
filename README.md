@@ -10,7 +10,9 @@ Solar-powered wadi nodes measure water level and rainfall, decide the alert leve
 |---|---|
 | `CONTEXT.md` | Project vocabulary and fixed constraints |
 | `docs/adr/` | Design decisions and their reasons |
+| `docs/gateway-contract.md` | The messages the gateway sends to the backend |
 | `firmware/` | Wadi node and siren node firmware, with tests that run on a PC |
+| `backend/` | Backend and dashboard: ingests gateway messages, serves the API and the map |
 | `report/NEXUS_Phase1_Report.docx` | Phase 1 report (editable) |
 | `report/NEXUS_Phase1_Report_preview.pdf` | Same content rendered to PDF |
 | `report/video_script.md` | 2-minute video pitch script |
@@ -62,4 +64,53 @@ pio run
 
 If `pio` is not on the PATH, use `python -m platformio` in its place. The board is set in `firmware/platformio.ini`; node identifiers and thresholds are set only in the site configuration inside the `wadiwatch` library.
 
-The hardware adapters (sensor, LoRa radio, siren driver) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway and dashboard will be added during the prototype phase.
+The hardware adapters (sensor, LoRa radio, siren driver) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway firmware will be added during the prototype phase.
+
+## Backend and dashboard
+
+The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests and the replay tool feed messages in.
+
+Setup, once (Python 3.10 or later):
+
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-dev.txt    # Windows
+.venv/bin/python -m pip install -r requirements-dev.txt        # Linux, macOS
+```
+
+The commands below are written as `python`. Use the interpreter of the virtual environment (`.venv/Scripts/python` or `.venv/bin/python`), or activate the environment first.
+
+Run the backend:
+
+```bash
+cd backend
+python -m wadiwatch_backend
+```
+
+Then open http://127.0.0.1:8000. Everything ingested is kept in `backend/data/wadiwatch.db` and is still there after a restart; delete that file to start empty.
+
+Run the tests:
+
+```bash
+cd backend
+python -m pytest
+```
+
+Replay the flood scenario into the running backend, from a second terminal, and watch the map change:
+
+```bash
+cd backend
+python -m wadiwatch_backend.replay              # one scenario minute per second, about two minutes
+python -m wadiwatch_backend.replay --speed 120  # twice as fast
+python -m wadiwatch_backend.replay --instant    # all at once, as an event that has just ended
+```
+
+The scenario (`backend/scenarios/flood_demo.jsonl`) is synthetic until there is hardware to record from: two wadi nodes rise through Watch and Warning, the downstream node reaches Evacuate by upstream confirmation, the siren node acknowledges, and an all clear ends the event.
+
+Settings are environment variables, listed in `backend/wadiwatch_backend/__main__.py`. Two matter most:
+
+- `WADIWATCH_MQTT_HOST`: the MQTT broker to read gateway messages from (topic `wadiwatch/up`). Without it the backend is fed only through `POST /api/ingest`, which is what the replay tool uses.
+- `WADIWATCH_SITE`: the site file with the nodes' identifiers, names and map positions. The default, `backend/site/prototype.json`, uses placeholder positions in the Nabeul area, not surveyed locations.
+
+The ingest endpoint is not authenticated. The backend listens on the local machine only unless `WADIWATCH_HOST` says otherwise; do not expose it to a network as it is.

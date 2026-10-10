@@ -1,0 +1,5 @@
+# Runtime dependencies plus what the tests need.
+-r requirements.txt
+pytest>=8,<10
+# The HTTP client FastAPI's test client drives the application with.
+httpx2>=2,<3

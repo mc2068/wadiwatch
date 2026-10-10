@@ -1,0 +1,45 @@
+{"why":"not JSON","raw":"level=84.5"}
+{"why":"truncated JSON","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":17915"}
+{"why":"empty payload","raw":""}
+{"why":"an array, not an object","raw":"[{\"v\":1,\"kind\":\"test\",\"node\":513,\"counter\":20,\"ts\":1791597600}]"}
+{"why":"nested value","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":{\"value\":84.5},\"rise_cm_min\":3.2}"}
+{"why":"version missing","raw":"{\"kind\":\"test\",\"node\":513,\"counter\":20,\"ts\":1791597600}"}
+{"why":"unsupported version","raw":"{\"v\":2,\"kind\":\"test\",\"node\":513,\"counter\":20,\"ts\":1791597600}"}
+{"why":"unknown kind","raw":"{\"v\":1,\"kind\":\"flood\",\"node\":257,\"counter\":1041,\"ts\":1791590400}"}
+{"why":"kind missing","raw":"{\"v\":1,\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"timestamp missing","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"timestamp is a string","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":\"2026-10-10T12:00:00Z\",\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"timestamp has a fraction","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400.5,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"counter missing","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"negative counter","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":-1,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"node is a string","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":\"0x0101\",\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"node is not in the site file","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":999,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"reading from a siren node","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":513,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2}"}
+{"why":"reading without a level","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"rise_cm_min\":3.2}"}
+{"why":"reading without a rate of rise","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5}"}
+{"why":"level is a string","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":\"84.5\",\"rise_cm_min\":3.2}"}
+{"why":"level is a boolean","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":true,\"rise_cm_min\":3.2}"}
+{"why":"level is null","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":null,\"rise_cm_min\":3.2}"}
+{"why":"negative level","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":-5,\"rise_cm_min\":3.2}"}
+{"why":"level is not a finite number","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":NaN,\"rise_cm_min\":3.2}"}
+{"why":"level beyond the accepted range","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":1e30,\"rise_cm_min\":3.2}"}
+{"why":"field that is not in the contract","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"depth_cm\":84.5}"}
+{"why":"field that belongs to another kind","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"alert_level\":\"warning\"}"}
+{"why":"alert without an alert level","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460}"}
+{"why":"alert level is not one of the four names","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"severe\"}"}
+{"why":"alert level as a number","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":2}"}
+{"why":"alert level in capitals","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"Warning\"}"}
+{"why":"alert from a siren node","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":513,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"warning\"}"}
+{"why":"acknowledgement from a wadi node","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":258,\"counter\":17,\"ts\":1791590462,\"wadi_node\":257,\"alert_level\":\"warning\"}"}
+{"why":"acknowledgement that does not name the wadi node","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":513,\"counter\":17,\"ts\":1791590462,\"alert_level\":\"warning\"}"}
+{"why":"acknowledgement of an alert from a node that is not a wadi node","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":513,\"counter\":17,\"ts\":1791590462,\"wadi_node\":513,\"alert_level\":\"warning\"}"}
+{"why":"acknowledgement of alert level none","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":513,\"counter\":17,\"ts\":1791590462,\"wadi_node\":257,\"alert_level\":\"none\"}"}
+{"why":"heartbeat without battery voltage","raw":"{\"v\":1,\"kind\":\"heartbeat\",\"node\":257,\"counter\":1043,\"ts\":1791590500,\"rssi_dbm\":-97,\"low_battery\":false,\"tamper\":false}"}
+{"why":"tamper flag as a number","raw":"{\"v\":1,\"kind\":\"heartbeat\",\"node\":257,\"counter\":1043,\"ts\":1791590500,\"battery_mv\":3920,\"rssi_dbm\":-97,\"low_battery\":false,\"tamper\":0}"}
+{"why":"battery voltage with a fraction","raw":"{\"v\":1,\"kind\":\"heartbeat\",\"node\":257,\"counter\":1043,\"ts\":1791590500,\"battery_mv\":3920.5,\"rssi_dbm\":-97,\"low_battery\":false,\"tamper\":false}"}
+{"why":"positive signal strength","raw":"{\"v\":1,\"kind\":\"heartbeat\",\"node\":257,\"counter\":1043,\"ts\":1791590500,\"battery_mv\":3920,\"rssi_dbm\":97,\"low_battery\":false,\"tamper\":false}"}
+{"why":"heartbeat from the gateway","raw":"{\"v\":1,\"kind\":\"heartbeat\",\"node\":769,\"counter\":6,\"ts\":1791590500,\"battery_mv\":3920,\"rssi_dbm\":-97,\"low_battery\":false,\"tamper\":false}"}
+{"why":"all clear sent by a node other than the gateway","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":257,\"counter\":5,\"ts\":1791594000,\"wadi_node\":257}"}
+{"why":"all clear that does not name the wadi node","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000}"}
+{"why":"all clear for a siren node","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi_node\":513}"}
+{"why":"test from a wadi node","raw":"{\"v\":1,\"kind\":\"test\",\"node\":257,\"counter\":20,\"ts\":1791597600}"}
