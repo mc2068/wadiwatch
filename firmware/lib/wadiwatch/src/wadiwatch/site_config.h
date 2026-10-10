@@ -4,9 +4,11 @@
 #include <cstdint>
 
 #include "wadiwatch/alert_engine.h"
+#include "wadiwatch/level_measurement.h"
 #include "wadiwatch/operating_mode.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/rain_window.h"
+#include "wadiwatch/rate_of_rise.h"
 
 namespace wadiwatch {
 
@@ -14,11 +16,14 @@ struct WadiNodeConfig {
   NodeId id;
   // Height of the sensor face above the wadi bed.
   float mountingHeightCm;
+  // Which readings of the level sensor are physically possible at this node.
+  LevelSensorConfig levelSensor;
   // Everything the alert engine compares against. The Watch level threshold is
   // also the level at or above which the node is in storm mode.
   AlertThresholds alertThresholds;
   OperatingModeConfig mode;
   RainConfig rain;
+  RateOfRiseConfig rateOfRise;
   uint32_t heartbeatIntervalMs;
 };
 

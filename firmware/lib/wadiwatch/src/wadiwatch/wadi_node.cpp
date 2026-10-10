@@ -1,6 +1,7 @@
 #include "wadiwatch/wadi_node.h"
 
 #include "wadiwatch/alert_engine.h"
+#include "wadiwatch/level_measurement.h"
 
 namespace wadiwatch {
 
@@ -8,6 +9,10 @@ namespace {
 
 constexpr float kMmPerCm = 10.0f;
 constexpr float kMaxLevelMm = 65535.0f;
+constexpr float kMaxRateMmPerMin = 32767.0f;
+constexpr float kTenthsPerMm = 10.0f;
+constexpr float kMaxRainTenthsMm = 65535.0f;
+constexpr uint8_t kMaxDiscardedReadings = 255;
 
 // A level as packets carry it: whole millimetres above the wadi bed. A reading
 // below the bed (sensor noise over a dry wadi) travels as zero.
@@ -16,6 +21,23 @@ uint16_t levelMm(float levelCm) {
   if (!(mm > 0.0f)) return 0;
   if (mm >= kMaxLevelMm) return static_cast<uint16_t>(kMaxLevelMm);
   return static_cast<uint16_t>(mm);
+}
+
+// A rate of rise as packets carry it: whole millimetres per minute, negative
+// while the level falls.
+int16_t rateMmPerMin(float rateCmPerMin) {
+  const float mm = rateCmPerMin * kMmPerCm;
+  if (mm >= kMaxRateMmPerMin) return static_cast<int16_t>(kMaxRateMmPerMin);
+  if (mm <= -kMaxRateMmPerMin) return static_cast<int16_t>(-kMaxRateMmPerMin);
+  return static_cast<int16_t>(mm < 0.0f ? mm - 0.5f : mm + 0.5f);
+}
+
+// Rainfall as packets carry it: tenths of a millimetre.
+uint16_t rainTenthsMm(float rainMm) {
+  const float tenths = rainMm * kTenthsPerMm + 0.5f;
+  if (!(tenths > 0.0f)) return 0;
+  if (tenths >= kMaxRainTenthsMm) return static_cast<uint16_t>(kMaxRainTenthsMm);
+  return static_cast<uint16_t>(tenths);
 }
 
 }  // namespace
@@ -28,7 +50,8 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
                    RainGauge& rainGauge,
                    NodeHealth& health,
                    Radio& radio,
-                   PersistentStorage& storage)
+                   PersistentStorage& storage,
+                   TemperatureSensor* temperature)
     : config_(config),
       clock_(clock),
       sleep_(sleep),
@@ -36,9 +59,11 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
       rainGauge_(rainGauge),
       health_(health),
       radio_(radio),
+      temperature_(temperature),
       codec_(auth, config.id, storage),
       mode_(config.mode),
-      rain_(config.rain, config.alertThresholds.watchRainWindowMs) {}
+      rain_(config.rain, config.alertThresholds.watchRainWindowMs),
+      rise_(config.rateOfRise) {}
 
 void WadiNode::tick() {
   const uint64_t now = clock_.nowMs();
@@ -61,6 +86,9 @@ void WadiNode::tick() {
   }
 
   raiseAlertLevel(now);
+  // After the alert, so that the alert is first on the air and the reading
+  // carries the alert level its measurement raised.
+  if (readingDue_) sendReading(now);
 
   if (now >= nextHeartbeatAtMs_) {
     sendHeartbeat();
@@ -79,22 +107,48 @@ void WadiNode::countRain(uint64_t nowMs) {
   mode_.onRain(nowMs);
 }
 
+// One measurement: several pings of the level sensor, filtered into one level.
 void WadiNode::measure(uint64_t nowMs) {
-  float distanceCm = 0;
-  if (!sensor_.readDistanceCm(distanceCm)) return;
+  AirTemperature air = {false, 0.0f};
+  if (temperature_ != nullptr) air.available = temperature_->readTemperatureC(air.celsius);
+  Ping pings[kPingsPerMeasurement];
+  for (Ping& ping : pings) {
+    ping.distanceCm = 0.0f;
+    ping.echoed = sensor_.readDistanceCm(ping.distanceCm);
+  }
+  const LevelMeasurement measurement =
+      measureLevel(pings, air, config_.mountingHeightCm, config_.levelSensor);
 
-  levelCm_ = config_.mountingHeightCm - distanceCm;
+  discardedReadings_ = measurement.discardedPings >= kMaxDiscardedReadings - discardedReadings_
+                           ? kMaxDiscardedReadings
+                           : static_cast<uint8_t>(discardedReadings_ + measurement.discardedPings);
+  // Too few usable pings: the node keeps the level it last measured.
+  if (!measurement.hasLevel) return;
+
+  levelCm_ = measurement.levelCm;
   hasLevel_ = true;
   const float watchLevelCm = levelThresholdCm(config_.alertThresholds, AlertLevel::Watch);
   mode_.onLevel(nowMs, levelCm_ >= watchLevelCm);
+
+  // The rate of rise follows storm-mode measurements only; each of them is
+  // also sent as a reading.
+  if (mode_.mode() == OperatingMode::Storm) {
+    rise_.addMeasurement(nowMs, levelCm_);
+    readingDue_ = true;
+  } else {
+    rise_.clear();
+  }
 }
 
 // The alert engine decides; this keeps the highest alert level it has called for.
 // Alert levels only escalate automatically; lowering one takes an all clear.
 void WadiNode::raiseAlertLevel(uint64_t nowMs) {
-  // Until the first measurement the level is that of a dry bed. Rate of rise
-  // and the upstream node are not measured yet.
-  const AlertInputs inputs = {levelCm_, 0.0f, rain_.rainMm(nowMs), AlertLevel::None};
+  // Until the first measurement the level is that of a dry bed. The upstream
+  // node is not heard yet.
+  const float sustainedRateOfRiseCmPerMin =
+      rise_.sustainedRateCmPerMin(config_.alertThresholds.warningRateOfRiseSustainMs);
+  const AlertInputs inputs = {levelCm_, sustainedRateOfRiseCmPerMin, rain_.rainMm(nowMs),
+                              AlertLevel::None};
   const AlertLevel evaluated = evaluateAlertLevel(inputs, config_.alertThresholds);
   if (evaluated <= alertLevel_) return;
   alertLevel_ = evaluated;
@@ -105,8 +159,21 @@ void WadiNode::sendAlert() {
   Packet packet = Packet();
   packet.kind = PacketKind::Alert;
   packet.alert.alertLevel = alertLevel_;
-  // The rate of rise is not measured yet.
   packet.alert.levelMm = levelMm(levelCm_);
+  packet.alert.rateOfRiseMmPerMin = rateMmPerMin(rise_.rateCmPerMin());
+  send(packet);
+}
+
+// What the gateway forwards to the dashboard for its curves.
+void WadiNode::sendReading(uint64_t nowMs) {
+  readingDue_ = false;
+  Packet packet = Packet();
+  packet.kind = PacketKind::Reading;
+  packet.reading.levelMm = levelMm(levelCm_);
+  packet.reading.rateOfRiseMmPerMin = rateMmPerMin(rise_.rateCmPerMin());
+  packet.reading.rainfallTenthsMm = rainTenthsMm(rain_.rainMm(nowMs));
+  packet.reading.alertLevel = alertLevel_;
+  packet.reading.stormMode = mode_.mode() == OperatingMode::Storm;
   send(packet);
 }
 
@@ -118,6 +185,9 @@ void WadiNode::sendHeartbeat() {
   packet.heartbeat.tamper = health_.tamperDetected();
   packet.heartbeat.hasLastLevel = hasLevel_;
   packet.heartbeat.lastLevelMm = levelMm(levelCm_);
+  // Each heartbeat reports the readings discarded since the one before.
+  packet.heartbeat.discardedReadings = discardedReadings_;
+  discardedReadings_ = 0;
   send(packet);
 }
 
