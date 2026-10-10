@@ -23,7 +23,20 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_by_node_kind ON messages (node, kind, id);
 CREATE INDEX IF NOT EXISTS messages_by_kind_wadi_node ON messages (kind, wadi_node, id);
+-- The all clear commands officers issued. `id` is the command's number: the gateway
+-- carries it in its all clear packets, and its all_clear messages bring it back.
+-- `sent` is 0 for a command that could not be handed to the gateway's broker.
+CREATE TABLE IF NOT EXISTS all_clear_commands (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    wadi         INTEGER NOT NULL,
+    officer      TEXT    NOT NULL,
+    requested_at INTEGER NOT NULL,
+    sent         INTEGER NOT NULL
+);
 """
+
+# The message kinds that can carry a water level (`level_cm`).
+LEVEL_KINDS = ("reading", "alert", "heartbeat")
 
 
 class MessageStore:
@@ -60,6 +73,24 @@ class MessageStore:
                 ),
             )
             return cursor.rowcount == 1
+
+    # All clear commands.
+
+    def add_command(self, wadi, officer, requested_at):
+        """Record an all clear command about to be sent. Returns its number."""
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "INSERT INTO all_clear_commands (wadi, officer, requested_at, sent)"
+                " VALUES (?, ?, ?, 0)",
+                (wadi, officer, int(requested_at)),
+            )
+            return cursor.lastrowid
+
+    def mark_command_sent(self, command):
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE all_clear_commands SET sent = 1 WHERE id = ?", (command,)
+            )
 
     @contextmanager
     def reader(self):
@@ -126,3 +157,42 @@ class Reader:
         return self._latest(
             "kind = 'acknowledgement' AND node = ? AND wadi_node = ?", (siren_node, wadi_node)
         )
+
+    def alert_with_counter(self, wadi_node, counter):
+        """The alert message a wadi node sent with this counter, if the gateway forwarded it."""
+        return self._latest("kind = 'alert' AND node = ? AND counter = ?", (wadi_node, counter))
+
+    # The all clear.
+
+    def level_reports(self, node):
+        """Every level a wadi node reported, as (gateway time, level in cm), newest first.
+
+        A level comes in a reading, behind an alert and in a heartbeat. Read
+        only as far back as needed: this walks the node's whole history.
+        """
+        marks = ", ".join("?" for _ in LEVEL_KINDS)
+        rows = self._connection.execute(
+            f"SELECT ts, body FROM messages WHERE node = ? AND kind IN ({marks})"
+            " ORDER BY ts DESC, id DESC",
+            (node, *LEVEL_KINDS),
+        )
+        for ts, body in rows:
+            level_cm = json.loads(body).get("level_cm")
+            if level_cm is not None:
+                yield ts, level_cm
+
+    def commands(self):
+        """Every all clear command that was sent to the gateway, oldest first."""
+        rows = self._connection.execute(
+            "SELECT id, wadi, officer, requested_at FROM all_clear_commands"
+            " WHERE sent = 1 ORDER BY id"
+        )
+        return [
+            {"command": command, "wadi": wadi, "officer": officer, "ts": requested_at}
+            for command, wadi, officer, requested_at in rows
+        ]
+
+    def commands_relayed(self):
+        """The numbers of the commands the gateway has reported transmitting an all clear for."""
+        rows = self._connection.execute("SELECT body FROM messages WHERE kind = 'all_clear'")
+        return {json.loads(body).get("command") for (body,) in rows} - {None}

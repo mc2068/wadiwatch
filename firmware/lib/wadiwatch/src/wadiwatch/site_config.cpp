@@ -91,6 +91,7 @@ SiteConfig makePrototypeSite() {
               /* receiveWindowMs */ 3000u,
           },
           /* alertResendIntervalMs */ 1u * kMinuteMs,
+          /* allClearWindowMs */ 2000u,
       },
       /* downstreamWadiNode */ {},  // filled in below
       /* sirenNode */ {
@@ -123,6 +124,15 @@ SiteConfig makePrototypeSite() {
           },
           /* batteryCount */ 3,
           /* uplinkRetryIntervalMs */ 30u * 1000u,
+          /* allClearRepeat */ {
+              /* transmissions */ 3,
+              /* minSpacingMs */ 1000u,
+              /* maxSpacingMs */ 4000u,
+          },
+          /* allClearHoldMs */ 90u * 1000u,
+          /* allClearAnswerPeriodMs */ 70u * kMinuteMs,
+          /* allClearMaxAnswers */ 5,
+          /* commandMaxAgeS */ 120u,
       },
       /* auth */ {},
       // A 24-byte packet takes 113 ms on the air with these settings. In storm mode at

@@ -3,6 +3,8 @@
     python -m wadiwatch_backend.replay                  one scenario minute per second
     python -m wadiwatch_backend.replay --speed 120      twice as fast
     python -m wadiwatch_backend.replay --instant        everything at once, as an event that just ended
+    python -m wadiwatch_backend.replay --leave-open     without the scenario's all clear, so that an
+                                                        officer can issue it from the dashboard
 
 A scenario is a file of gateway messages, one per line, exactly as the
 contract defines them. Only their timestamps are rewritten: the gaps between
@@ -37,6 +39,11 @@ class ReplaySummary:
 def load_scenario(path):
     with open(path, encoding="utf-8") as lines:
         return [json.loads(line) for line in lines if line.strip()]
+
+
+def left_open(scenario):
+    """The scenario without its all clear: the event is left for an officer to end."""
+    return [message for message in scenario if message["kind"] != "all_clear"]
 
 
 def replay(
@@ -131,11 +138,18 @@ def main(argv=None):
         action="store_true",
         help="send everything at once, timestamped as an event that has just ended",
     )
+    parser.add_argument(
+        "--leave-open",
+        action="store_true",
+        help="leave out the scenario's all clear, to issue it from the dashboard",
+    )
     arguments = parser.parse_args(argv)
     if arguments.speed <= 0:
         parser.error("--speed must be greater than 0")
 
     scenario = load_scenario(arguments.scenario)
+    if arguments.leave_open:
+        scenario = left_open(scenario)
     try:
         summary = replay(
             scenario,

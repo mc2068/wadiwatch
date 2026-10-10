@@ -17,12 +17,13 @@ namespace {
 //   8-15   payload, by kind (unused bytes are zero):
 //            reading          level mm (2), rate of rise mm/min (2), rainfall 0.1 mm (2),
 //                             alert level (1), flags (1)
-//            alert            alert level (1), level mm (2), rate of rise mm/min (2)
+//            alert            alert level (1), level mm (2), rate of rise mm/min (2),
+//                             flags (1): alert refresh 0x01
 //            acknowledgement  alert sender (2), alert counter (4), alert level (1)
 //            heartbeat        battery mV (2), signal dBm (2), last level mm (2),
 //                             discarded readings (1), flags (1): tamper 0x01,
 //                             alert refresh lost 0x02, has last level 0x04
-//            all clear        wadi node identifier (2)
+//            all clear        wadi node identifier (2), command (4)
 //            test             nothing
 //   16-23  authentication code: HMAC-SHA-256 of bytes 0-15 under the site key,
 //          cut to its first 8 bytes
@@ -41,6 +42,7 @@ static_assert(kAuthCodeOffset == kPacketContentSize,
 static_assert(kPacketSize <= kMaxPacketSize, "a packet must fit a receive buffer");
 
 constexpr uint8_t kReadingFlagStormMode = 0x01;
+constexpr uint8_t kAlertFlagRefresh = 0x01;
 constexpr uint8_t kHeartbeatFlagTamper = 0x01;
 constexpr uint8_t kHeartbeatFlagAlertRefreshLost = 0x02;
 constexpr uint8_t kHeartbeatFlagHasLastLevel = 0x04;
@@ -85,6 +87,7 @@ bool writePayload(const Packet& packet, uint8_t* payload) {
       payload[0] = static_cast<uint8_t>(alert.alertLevel);
       put16(payload + 1, alert.levelMm);
       put16(payload + 3, static_cast<uint16_t>(alert.rateOfRiseMmPerMin));
+      payload[5] = alert.refresh ? kAlertFlagRefresh : 0;
       return true;
     }
     case PacketKind::Acknowledgement: {
@@ -108,6 +111,7 @@ bool writePayload(const Packet& packet, uint8_t* payload) {
     }
     case PacketKind::AllClear:
       put16(payload, packet.allClear.wadiNode);
+      put32(payload + 2, packet.allClear.command);
       return true;
     case PacketKind::Test:
       return true;
@@ -131,6 +135,7 @@ bool readPayload(uint8_t kind, const uint8_t* payload, Packet& packet) {
       packet.alert.alertLevel = static_cast<AlertLevel>(payload[0]);
       packet.alert.levelMm = get16(payload + 1);
       packet.alert.rateOfRiseMmPerMin = static_cast<int16_t>(get16(payload + 3));
+      packet.alert.refresh = (payload[5] & kAlertFlagRefresh) != 0;
       break;
     case PacketKind::Acknowledgement:
       if (!isAlertLevel(payload[6])) return false;
@@ -149,6 +154,7 @@ bool readPayload(uint8_t kind, const uint8_t* payload, Packet& packet) {
       break;
     case PacketKind::AllClear:
       packet.allClear.wadiNode = get16(payload);
+      packet.allClear.command = get32(payload + 2);
       break;
     case PacketKind::Test:
       break;

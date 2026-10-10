@@ -4,9 +4,11 @@
 {"v":1,"kind":"alert","node":257,"counter":1042,"ts":1791590460,"alert_level":"warning"}
 {"v":1,"kind":"alert","node":258,"counter":89,"ts":1791590461,"alert_level":"none"}
 {"v":1,"kind":"alert","node":257,"counter":1044,"ts":1791590520,"alert_level":"evacuate","level_cm":152.0,"rise_cm_min":4.8}
+{"v":1,"kind":"alert","node":257,"counter":1046,"ts":1791590640,"alert_level":"evacuate","level_cm":150.5,"rise_cm_min":-0.4,"refresh":true}
 {"v":1,"kind":"acknowledgement","node":513,"counter":17,"ts":1791590462,"wadi_node":257,"alert_level":"warning"}
 {"v":1,"kind":"acknowledgement","node":513,"counter":18,"ts":1791590522,"wadi_node":257,"alert_level":"evacuate","alert_counter":1044}
 {"v":1,"kind":"heartbeat","node":257,"counter":1043,"ts":1791590500,"battery_mv":3920,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":84.5,"discards":2}
 {"v":1,"kind":"heartbeat","node":513,"counter":19,"ts":1791590530,"battery_mv":12480,"rssi_dbm":-88,"low_battery":true,"tamper":true,"refresh_lost":true}
 {"v":1,"kind":"all_clear","node":769,"counter":5,"ts":1791594000,"wadi_node":257}
+{"v":1,"kind":"all_clear","node":769,"counter":6,"ts":1791594003,"wadi_node":258,"command":41}
 {"v":1,"kind":"test","node":513,"counter":20,"ts":1791597600}

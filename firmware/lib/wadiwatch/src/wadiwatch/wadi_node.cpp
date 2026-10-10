@@ -94,7 +94,7 @@ void WadiNode::tick() {
     upstream_.onMeasurement(now);
   }
 
-  handleReceivedFrames();
+  handleReceivedFrames(now);
   raiseAlertLevel(now);
   resendAlert(now);
   repeatAlert(now);
@@ -162,15 +162,49 @@ void WadiNode::measure(uint64_t nowMs) {
 
 // Takes in what the receiver has heard. The codec is the only way in: a frame that
 // is forged, foreign or replayed is dropped here.
-void WadiNode::handleReceivedFrames() {
+void WadiNode::handleReceivedFrames(uint64_t nowMs) {
   if (!receiverOn_) return;
   uint8_t frame[kMaxPacketSize];
   size_t length;
   while ((length = radio_.receive(frame, sizeof(frame))) > 0) {
     Packet packet;
     if (!codec_.decode(frame, length, packet)) continue;
-    upstream_.onPacket(packet);
+    if (packet.kind == PacketKind::AllClear) {
+      handleAllClear(packet, nowMs);
+    } else {
+      upstream_.onPacket(packet);
+    }
   }
+}
+
+// An all clear ends the event at the wadi node it names. Like the siren node, this
+// node takes it from any node of the site its codec accepts: with one key for the
+// whole site, the sender's identifier proves nothing the authentication code does not.
+void WadiNode::handleAllClear(const Packet& allClear, uint64_t nowMs) {
+  const NodeId cleared = allClear.allClear.wadiNode;
+  // The event at the upstream node is over: a Warning heard from it must not turn a
+  // later Warning here into Evacuate.
+  if (cleared != kNoNode && cleared == upstream_.node()) upstream_.forget();
+  if (cleared != config_.id) return;
+
+  // An all clear is given for a wadi and names each of its wadi nodes in turn. The
+  // upstream node is on the same wadi, so its event has ended with this one.
+  upstream_.forget();
+  if (alertLevel_ == AlertLevel::None) return;
+  alertLevel_ = AlertLevel::None;
+  // The alert is over: the transmissions it still had to come are not made, and so
+  // nothing holds back the reading below.
+  alertRepeater_.cancel();
+  // A reading at once, carrying no alert level: it tells the gateway that this node
+  // has heard, so the gateway stops answering it. It goes out before the alert
+  // level is looked at again, so an alert raised next is plainly a new one.
+  sendReading(nowMs);
+}
+
+// Whether this node has anything an all clear would end. Only then is the answer
+// window worth its energy: on a dry day the receiver stays off.
+bool WadiNode::holdsWhatAnAllClearEnds() const {
+  return alertLevel_ != AlertLevel::None || upstream_.alertLevel() != AlertLevel::None;
 }
 
 // The alert engine decides; this keeps the highest alert level it has called for.
@@ -184,28 +218,32 @@ void WadiNode::raiseAlertLevel(uint64_t nowMs) {
   const AlertLevel evaluated = evaluateAlertLevel(inputs, config_.alertThresholds);
   if (evaluated <= alertLevel_) return;
   alertLevel_ = evaluated;
-  announceAlert(nowMs);
+  announceAlert(nowMs, /* refresh */ false);
 }
 
 // Watch is announced once. From Warning up the alert is sent again and again, so that
 // a receiver that missed it, and the node downstream, still hear it.
 bool WadiNode::hasAlertToResend() const { return alertLevel_ >= AlertLevel::Warning; }
 
-void WadiNode::announceAlert(uint64_t nowMs) {
-  sendAlert();
+void WadiNode::announceAlert(uint64_t nowMs, bool refresh) {
+  sendAlert(refresh);
   nextAlertResendAtMs_ = nowMs + config_.alertResendIntervalMs;
 }
 
-// Each re-send is a new packet with its own counter: receivers accept it as a refresh.
-// It is an alert like any other, so it goes out several times and takes over from
-// whatever transmissions an earlier alert still had to come.
+// Each re-send is a new packet with its own counter: receivers accept it as a refresh,
+// and it says that it is one. It is an alert like any other, so it goes out several
+// times and takes over from whatever transmissions an earlier alert still had to come.
 void WadiNode::resendAlert(uint64_t nowMs) {
-  if (hasAlertToResend() && nowMs >= nextAlertResendAtMs_) announceAlert(nowMs);
+  if (hasAlertToResend() && nowMs >= nextAlertResendAtMs_) {
+    announceAlert(nowMs, /* refresh */ true);
+  }
 }
 
-// The upstream link says when the receiver is worth its energy.
+// The upstream link says when the receiver is worth its energy for hearing the
+// upstream node; the answer window keeps it on after a transmission of this node's.
 void WadiNode::switchReceiver(uint64_t nowMs) {
-  const bool wanted = upstream_.wantsReceiver(nowMs, mode_.mode(), alertLevel_);
+  const bool wanted = upstream_.wantsReceiver(nowMs, mode_.mode(), alertLevel_) ||
+                      nowMs < answerWindowEndsAtMs_;
   if (wanted == receiverOn_) return;
   if (wanted) {
     // Only what arrives from now on counts as heard: drop whatever the radio still
@@ -218,10 +256,11 @@ void WadiNode::switchReceiver(uint64_t nowMs) {
   radio_.setListening(wanted);
 }
 
-void WadiNode::sendAlert() {
+void WadiNode::sendAlert(bool refresh) {
   Packet packet = Packet();
   packet.kind = PacketKind::Alert;
   packet.alert.alertLevel = alertLevel_;
+  packet.alert.refresh = refresh;
   packet.alert.levelMm = levelMm(levelCm_);
   packet.alert.rateOfRiseMmPerMin = rateMmPerMin(rise_.rateCmPerMin());
   // Every alert goes out several times. The further transmissions are these same
@@ -280,9 +319,14 @@ size_t WadiNode::send(Packet& packet, uint8_t* frame, size_t capacity) {
   return length;
 }
 
-// The only place this node touches the radio's transmitter.
+// The only place this node touches the radio's transmitter. The gateway answers a
+// packet from a node it has an all clear for, so the answer window opens here.
 void WadiNode::transmit(const uint8_t* frame, size_t length) {
-  if (length > 0) radio_.send(frame, length);
+  if (length == 0) return;
+  radio_.send(frame, length);
+  if (holdsWhatAnAllClearEnds()) {
+    answerWindowEndsAtMs_ = clock_.nowMs() + config_.allClearWindowMs;
+  }
 }
 
 void WadiNode::sleepUntilNextDue(uint64_t nowMs) {
@@ -300,6 +344,9 @@ void WadiNode::sleepUntilNextDue(uint64_t nowMs) {
   const uint64_t windowEndsAtMs = upstream_.windowEndsAtMs();
   if (receiverOn_ && windowEndsAtMs > nowMs && windowEndsAtMs < nextDueAtMs) {
     nextDueAtMs = windowEndsAtMs;
+  }
+  if (receiverOn_ && answerWindowEndsAtMs_ > nowMs && answerWindowEndsAtMs_ < nextDueAtMs) {
+    nextDueAtMs = answerWindowEndsAtMs_;
   }
   if (nextDueAtMs > nowMs) sleep_.requestSleepMs(nextDueAtMs - nowMs);
 }

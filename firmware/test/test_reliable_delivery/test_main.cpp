@@ -21,7 +21,6 @@ using wadiwatch::PacketKind;
 using wadiwatch::SiteAuth;
 using wadiwatch::testing::FakeRandom;
 using wadiwatch::testing::Frame;
-using wadiwatch::testing::ScriptedGateway;
 using wadiwatch::testing::ScriptedNode;
 using wadiwatch::testing::SirenSound;
 using wadiwatch::testing::TestSite;
@@ -142,6 +141,18 @@ size_t heartbeatsReportingALostRefresh(const TestSite& site) {
 // the wadi node themselves.
 uint64_t refreshIntervalMs(const TestSite& site) {
   return site.config.sirenNode.alertRefreshTimeoutMs / 3;
+}
+
+// The flood is over: the bed is dry again, and the wadi node has measured it.
+void waterRecedes(TestSite& site) {
+  site.levelSensor.setWaterLevelCm(0);
+  site.runMs(2 * site.config.wadiNode.mode.stormMeasureIntervalMs);
+}
+
+// An officer issues the all clear on the dashboard, and the gateway relays it.
+void issueAllClear(TestSite& site) {
+  site.issueAllClear();
+  site.runMs(site.allClearSettleMs());
 }
 
 // The scenario's own wadi node re-sends its alert at every refresh interval for `durationMs`.
@@ -383,8 +394,7 @@ static void test_an_alert_that_is_not_accepted_is_not_acknowledged() {
 // --- The siren node latches the alert until an all clear ---
 
 static void test_the_siren_stays_on_after_the_wadi_node_stops_transmitting_until_an_accepted_all_clear() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  TestSite site;
   floodTo(site, AlertLevel::Warning);
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
 
@@ -393,59 +403,74 @@ static void test_the_siren_stays_on_after_the_wadi_node_stops_transmitting_until
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
   TEST_ASSERT_TRUE(site.siren.isStrobeOn());
 
-  site.air.inject(gateway.allClear(site.config.wadiNode.id));
+  issueAllClear(site);
 
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
   TEST_ASSERT_FALSE(site.siren.isStrobeOn());
 }
 
 static void test_an_all_clear_that_is_not_accepted_does_not_silence_the_siren() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  TestSite site;
   floodTo(site, AlertLevel::Evacuate);
-  site.unplugWadiNode();
+  waterRecedes(site);
 
+  // Signed with another key, in the gateway's name.
   SiteAuth forgerAuth = site.config.auth;
   forgerAuth.key[0] ^= 0x01;
-  ScriptedNode forger(forgerAuth, gateway.id);
+  ScriptedNode forger(forgerAuth, site.config.gateway.id);
   site.air.inject(forger.allClear(site.config.wadiNode.id));
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
 
+  // Signed with the site key, by a transmitter that is not a node of the site.
   ScriptedNode outsider(site.config.auth, site.nodeIdOutsideSite());
   site.air.inject(outsider.allClear(site.config.wadiNode.id));
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
 
-  // Control: the gateway's own all clear does.
-  site.air.inject(gateway.allClear(site.config.wadiNode.id));
+  // Control: the all clear the gateway transmits does.
+  issueAllClear(site);
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
 }
 
 static void test_an_all_clear_for_another_wadi_node_does_not_silence_the_siren() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  // The second wadi node is mounted over a wadi of its own.
+  wadiwatch::SiteConfig config = wadiwatch::prototypeSite();
+  wadiwatch::WadiConfig& wadi = config.gateway.wadis[0];
+  wadiwatch::WadiConfig otherWadi = wadi;
+  otherWadi.id = static_cast<wadiwatch::WadiId>(wadi.id + 1);
+  otherWadi.wadiNodes[0] = config.downstreamWadiNode.id;
+  otherWadi.wadiNodeCount = 1;
+  wadi.wadiNodes[0] = config.wadiNode.id;
+  wadi.wadiNodeCount = 1;
+  config.gateway.wadis[1] = otherWadi;
+  config.gateway.wadiCount = 2;
+  TestSite site(config);
   floodTo(site, AlertLevel::Warning);
-  site.unplugWadiNode();
 
-  // The event at some other node of the site is over; this wadi node's is not.
-  site.air.inject(gateway.allClear(gateway.id));
+  // The event at the other wadi is over; this wadi node's is not.
+  site.issueAllClear(otherWadi.id);
+  site.runMs(site.allClearSettleMs());
 
+  const std::vector<Packet> allClears = site.packetsOnAir(PacketKind::AllClear);
+  TEST_ASSERT_EQUAL_UINT(1, allClears.size());
+  TEST_ASSERT_EQUAL_UINT16(config.downstreamWadiNode.id, allClears[0].allClear.wadiNode);
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
   TEST_ASSERT_TRUE(site.siren.isStrobeOn());
 }
 
 static void test_after_an_all_clear_a_new_alert_sounds_the_siren_and_the_old_all_clear_cannot_silence_it() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  TestSite site;
   floodTo(site, AlertLevel::Warning);
-  const Frame allClear = gateway.allClear(site.config.wadiNode.id);
-  site.air.inject(allClear);
-  site.runMs(TestSite::kStepMs);
+  waterRecedes(site);
+  issueAllClear(site);
+  ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
+  const std::vector<Frame> allClears = site.framesOnAir(PacketKind::AllClear);
+  TEST_ASSERT_FALSE(allClears.empty());
 
   floodTo(site, AlertLevel::Evacuate);
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
 
-  // Someone plays the recorded all clear back.
-  site.air.inject(allClear);
+  // Someone plays the recorded all clears back.
+  for (const Frame& allClear : allClears) site.air.inject(allClear);
 
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
   TEST_ASSERT_TRUE(site.siren.isStrobeOn());
@@ -559,11 +584,10 @@ static void test_a_siren_node_restarted_during_an_alert_resumes_the_latched_aler
 }
 
 static void test_a_siren_node_restarted_after_the_all_clear_stays_silent() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  TestSite site;
   floodTo(site, AlertLevel::Evacuate);
-  site.unplugWadiNode();
-  site.air.inject(gateway.allClear(site.config.wadiNode.id));
+  waterRecedes(site);
+  issueAllClear(site);
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
 
   site.restartSirenNode();
@@ -656,9 +680,11 @@ static void test_a_button_press_during_a_real_alert_does_not_silence_it() {
 }
 
 static void test_an_alert_that_arrives_during_a_test_takes_over_and_the_button_cannot_silence_it() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
-  // The scenario must be over before the test would have ended by itself.
+  // A gateway that transmits the all clear as soon as the command arrives, so that the
+  // scenario is over before the test would have ended by itself.
+  wadiwatch::SiteConfig config = wadiwatch::prototypeSite();
+  config.gateway.allClearHoldMs = 0;
+  TestSite site(config);
   TEST_ASSERT_TRUE(site.config.sirenNode.testDurationMs > 4 * patternPeriodMs(site));
   site.unplugWadiNode();
   ScriptedNode wadiNode(site.config.auth, site.config.wadiNode.id);
@@ -676,8 +702,10 @@ static void test_an_alert_that_arrives_during_a_test_takes_over_and_the_button_c
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
   TEST_ASSERT_TRUE(site.siren.isStrobeOn());
 
-  // After the all clear the interrupted test does not start up again.
-  site.air.inject(gateway.allClear(site.config.wadiNode.id));
+  // After the all clear the interrupted test does not start up again. The gateway
+  // takes the command in and transmits in one step; the siren node hears in the next.
+  site.issueAllClear();
+  site.runMs(2 * TestSite::kStepMs);
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
   TEST_ASSERT_FALSE(site.siren.isStrobeOn());
 }

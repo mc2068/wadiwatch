@@ -189,6 +189,28 @@ uint64_t stepsListening(TestSite& site, const Node& node, uint64_t steps) {
   return listening;
 }
 
+// The same, leaving out the answer window: the time after each transmission of the
+// node's own in which a node in alert listens for the gateway's all clear. What is
+// counted is the listening the node does for the sake of its upstream node.
+uint64_t stepsListeningOutsideAnswerWindows(TestSite& site, const Node& node, uint64_t steps) {
+  uint64_t listening = 0;
+  size_t framesSent = node.radio.sent().size();
+  uint64_t lastSentAtMs = 0;
+  bool sent = false;
+  for (uint64_t step = 0; step < steps; ++step) {
+    site.runMs(kStepMs);
+    if (node.radio.sent().size() != framesSent) {
+      framesSent = node.radio.sent().size();
+      lastSentAtMs = site.clock.nowMs();
+      sent = true;
+    }
+    const bool answerWindowOpen =
+        sent && site.clock.nowMs() - lastSentAtMs < node.config.allClearWindowMs;
+    if (node.radio.isListening() && !answerWindowOpen) ++listening;
+  }
+  return listening;
+}
+
 // In how many of the next `steps` simulation steps the node pings its level sensor:
 // how many measurements it takes, a measurement being several pings in one go.
 uint64_t stepsWithAMeasurement(TestSite& site, const Node& node, uint64_t steps) {
@@ -651,16 +673,24 @@ static void test_the_downstream_node_sleeps_from_the_end_of_its_receive_window_t
                            downstream.sleep.wakeAtMs());
 }
 
-static void test_a_node_with_no_upstream_node_keeps_its_receiver_off_through_a_flood() {
+static void test_a_node_with_no_upstream_node_opens_no_receive_window_through_a_flood() {
   TestSite site;
   const Node upstream = upstreamNode(site);
   upstream.rainGauge.tip();
 
+  // In storm mode with no alert its receiver is off altogether.
+  upstream.levelSensor.setWaterLevelCm(levelBelowWatch(upstream));
+  TEST_ASSERT_EQUAL_UINT64(
+      0, stepsListening(site, upstream, 5ull * upstream.config.mode.stormMeasureIntervalMs / kStepMs));
+
+  // In alert it listens after its own transmissions, for the all clear, and at no
+  // other time: it has no upstream node to listen for.
   const AlertLevel levels[] = {AlertLevel::Watch, AlertLevel::Warning, AlertLevel::Evacuate};
   for (const AlertLevel level : levels) {
     upstream.levelSensor.setWaterLevelCm(levelWithin(upstream, level));
     TEST_ASSERT_EQUAL_UINT64(
-        0, stepsListening(site, upstream, 5ull * upstream.config.mode.stormMeasureIntervalMs / kStepMs));
+        0, stepsListeningOutsideAnswerWindows(
+               site, upstream, 5ull * upstream.config.mode.stormMeasureIntervalMs / kStepMs));
     ASSERT_ALERT_LEVEL(level, alertLevelOf(site, upstream));
   }
 }
@@ -678,8 +708,10 @@ static void test_at_warning_the_downstream_node_listens_until_the_upstream_node_
   holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
   waitForAlertLevel(site, downstream, AlertLevel::Evacuate, kStepMs);
 
-  // At Evacuate there is nothing left to listen for.
-  TEST_ASSERT_EQUAL_UINT64(0, stepsListening(site, downstream, steps));
+  // At Evacuate there is nothing left to listen for from upstream: the receiver is on
+  // only after the node's own transmissions, for the all clear.
+  TEST_ASSERT_EQUAL_UINT64(0, stepsListeningOutsideAnswerWindows(site, downstream, steps));
+  TEST_ASSERT_TRUE(stepsListening(site, downstream, steps) < steps / 2);
 }
 
 // --- Duty cycle ---
@@ -787,7 +819,7 @@ int main(int, char**) {
   RUN_TEST(test_in_dry_mode_neither_wadi_node_switches_its_receiver_on);
   RUN_TEST(test_in_storm_mode_the_downstream_node_listens_for_the_receive_window_after_each_measurement);
   RUN_TEST(test_the_downstream_node_sleeps_from_the_end_of_its_receive_window_to_its_next_measurement);
-  RUN_TEST(test_a_node_with_no_upstream_node_keeps_its_receiver_off_through_a_flood);
+  RUN_TEST(test_a_node_with_no_upstream_node_opens_no_receive_window_through_a_flood);
   RUN_TEST(test_at_warning_the_downstream_node_listens_until_the_upstream_node_confirms);
   RUN_TEST(test_airtime_of_each_wadi_node_in_storm_mode_stays_under_the_duty_cycle_limit);
   RUN_TEST(test_the_two_wadi_nodes_are_one_event_for_the_gateway_and_the_confirmed_evacuate_is_told_once);

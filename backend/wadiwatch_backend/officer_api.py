@@ -19,8 +19,8 @@ How a request that changes something is protected:
 Sign-in has no session yet, so instead of the token it must be sent as JSON,
 which a form on another site cannot do.
 
-A later ticket that adds an officer-only action (the all clear) should guard
-it with `officer_session`, as the acknowledgement route does.
+Every officer-only action is guarded with `officer_session`, as the
+acknowledgement route here and the all clear route (all_clear_api.py) are.
 """
 
 import hmac

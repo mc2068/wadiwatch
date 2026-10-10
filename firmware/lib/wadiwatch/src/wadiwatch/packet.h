@@ -41,6 +41,11 @@ struct AlertPayload {
   AlertLevel alertLevel;
   uint16_t levelMm;
   int16_t rateOfRiseMmPerMin;
+  // False for the alert that raises the node's alert level; true for an alert
+  // refresh, which a node at Warning or above sends every minute to repeat the level
+  // it already announced. The gateway needs the difference after an all clear: a
+  // refresh comes from a node that has not heard it, a raise is a new event.
+  bool refresh;
 };
 
 // A siren node's answer to an alert it accepted: which alert, and the level it is acting on.
@@ -69,6 +74,10 @@ struct HeartbeatPayload {
 // The end of the event at one wadi node, confirmed by an authorised officer.
 struct AllClearPayload {
   NodeId wadiNode;
+  // The backend's number for the all clear command the gateway is relaying. Every
+  // all clear packet sent for one command carries it, so the backend can tell which
+  // officer's decision a packet belongs to. Receivers do not act on it.
+  uint32_t command;
 };
 
 // A test packet has no payload: its sender is the siren node under test.

@@ -6,6 +6,11 @@
 // ingest the same file and fail if the backend refuses a line. So the gateway and the
 // backend cannot drift apart without a test failing on one side.
 //
+// The same directory holds backend-commands.jsonl: what the backend sends down to the
+// gateway. This test fails if the gateway core refuses a line of it, and the scenario
+// below takes its all clear command from it word for word; the backend tests fail if
+// the backend does not produce those lines byte for byte.
+//
 // After an intended change to the messages, rewrite the file and then run the backend
 // tests:
 //
@@ -20,19 +25,19 @@
 
 #include <unity.h>
 
+#include "wadiwatch/downlink_command.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/site_config.h"
-#include "wadiwatch/uplink_message.h"
 #include "wadiwatch_testing/quiet_site.h"
 
 using wadiwatch::AlertLevel;
+using wadiwatch::AllClearCommand;
 using wadiwatch::GatewayConfig;
 using wadiwatch::NodeId;
 using wadiwatch::Packet;
-using wadiwatch::PacketCodec;
 using wadiwatch::PacketKind;
-using wadiwatch::testing::FakeStorage;
 using wadiwatch::testing::QuietSite;
+using wadiwatch::testing::TestSite;
 
 void setUp() {}
 void tearDown() {}
@@ -40,6 +45,7 @@ void tearDown() {}
 namespace {
 
 const char kOutputFile[] = "gateway-output.jsonl";
+const char kCommandsFile[] = "backend-commands.jsonl";
 // A file that is always in the directory of the contract examples.
 const char kLandmarkFile[] = "valid.jsonl";
 const char kDirectoryVariable[] = "WADIWATCH_CONTRACT_DIR";
@@ -65,12 +71,20 @@ Packet reading(uint16_t levelMm, int16_t rateOfRiseMmPerMin, uint16_t rainfallTe
   return packet;
 }
 
+// An alert that raises the node's alert level.
 Packet alert(AlertLevel alertLevel, uint16_t levelMm, int16_t rateOfRiseMmPerMin) {
   Packet packet = Packet();
   packet.kind = PacketKind::Alert;
   packet.alert.alertLevel = alertLevel;
   packet.alert.levelMm = levelMm;
   packet.alert.rateOfRiseMmPerMin = rateOfRiseMmPerMin;
+  return packet;
+}
+
+// The alert a node at Warning or above sends again every minute.
+Packet alertRefresh(AlertLevel alertLevel, uint16_t levelMm, int16_t rateOfRiseMmPerMin) {
+  Packet packet = alert(alertLevel, levelMm, rateOfRiseMmPerMin);
+  packet.alert.refresh = true;
   return packet;
 }
 
@@ -81,6 +95,36 @@ Packet acknowledgement(const Packet& acknowledged) {
   packet.acknowledgement.alertCounter = acknowledged.counter;
   packet.acknowledgement.alertLevel = acknowledged.alert.alertLevel;
   return packet;
+}
+
+// Where the contract examples are. The tests are started from firmware/ (pio test) or
+// from the repository root (pio test -d firmware); anywhere else, name the directory
+// in WADIWATCH_CONTRACT_DIR.
+std::string contractDirectory() {
+  if (const char* named = std::getenv(kDirectoryVariable)) return named;
+  for (const char* candidate : {"../docs/gateway-contract", "docs/gateway-contract"}) {
+    if (std::ifstream(std::string(candidate) + "/" + kLandmarkFile).good()) return candidate;
+  }
+  TEST_FAIL_MESSAGE("docs/gateway-contract not found: set WADIWATCH_CONTRACT_DIR");
+  return std::string();
+}
+
+std::vector<std::string> linesOf(const std::string& path) {
+  std::ifstream file(path, std::ios::binary);
+  TEST_ASSERT_TRUE_MESSAGE(file.good(), ("cannot read " + path).c_str());
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(file, line)) {
+    // A checkout on Windows may have turned the line ends into CR LF.
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (!line.empty()) lines.push_back(line);
+  }
+  return lines;
+}
+
+// The commands the backend sends down, as the shared examples word them.
+std::vector<std::string> backendCommands() {
+  return linesOf(contractDirectory() + "/" + kCommandsFile);
 }
 
 // One flood on the prototype site as the gateway hears it, packet by packet, and the
@@ -118,7 +162,7 @@ std::vector<std::string> gatewayOutput() {
   // A wadi node at Warning sends its alert again every minute: a refresh, with a new
   // counter and the level of the moment. The downstream wadi node hears it and raises
   // Evacuate on a level that is still short of that threshold.
-  const Packet refresh = site.transmit(wadiNode, alert(AlertLevel::Warning, 1105, 50));
+  const Packet refresh = site.transmit(wadiNode, alertRefresh(AlertLevel::Warning, 1105, 50));
   site.transmit(sirenNode, acknowledgement(refresh));
   const Packet confirmed =
       site.transmit(downstreamWadiNode, alert(AlertLevel::Evacuate, 1090, 51));
@@ -167,54 +211,36 @@ std::vector<std::string> gatewayOutput() {
   site.transmit(sirenNode, test);
   site.runMinutes(1);
 
-  std::vector<std::string> output = site.uplink.published();
+  // The flood passes. An officer issues the all clear on the dashboard: the backend's
+  // command comes down the uplink, word for word as the shared examples have it and at
+  // the time it is dated.
+  const std::string command = backendCommands().front();
+  AllClearCommand issued;
+  TEST_ASSERT_TRUE(wadiwatch::parseAllClearCommand(command.data(), command.size(), issued));
+  TEST_ASSERT_TRUE_MESSAGE(issued.issuedAt >= site.wallClock.unixSeconds(),
+                           "the command in backend-commands.jsonl is dated before the scenario "
+                           "reaches it: give it a later ts");
+  site.runMs((issued.issuedAt - site.wallClock.unixSeconds()) * 1000ull);
+  site.uplink.deliver(command);
+  site.runMs(TestSite::kStepMs);
 
-  // The all clear is a packet the gateway sends, and it does not send one yet. Until it
-  // does, its messages are taken from the translation the gateway core forwards with,
-  // for the packets the gateway's own codec signs: one all clear for each wadi node
-  // in alert. Once the gateway sends the all clear, produce these lines through its
-  // ports like the others.
-  FakeStorage gatewayCounters;
-  PacketCodec gatewayCodec(site.config.auth, gateway.id, gatewayCounters);
-  for (const NodeId cleared : {wadiNode.id, downstreamWadiNode.id}) {
-    Packet allClear = Packet();
-    allClear.kind = PacketKind::AllClear;
-    allClear.allClear.wadiNode = cleared;
-    uint8_t frame[wadiwatch::kMaxPacketSize];
-    TEST_ASSERT_TRUE(gatewayCodec.encode(allClear, frame, sizeof(frame)) > 0);
-    char message[wadiwatch::kMaxUplinkMessageLength + 1];
-    const size_t length = wadiwatch::writeUplinkMessage(
-        allClear, site.wallClock.unixSeconds(), gateway, message, sizeof(message));
-    TEST_ASSERT_TRUE(length > 0);
-    output.push_back(std::string(message, length));
-  }
+  // The upstream wadi node sends its alert again. The gateway answers with the all
+  // clear for it, and the node says at once that it holds no alert level any more.
+  const Packet stillEvacuate =
+      site.transmit(wadiNode, alertRefresh(AlertLevel::Evacuate, 310, -42));
+  site.transmit(sirenNode, acknowledgement(stillEvacuate));
+  site.transmit(wadiNode, reading(310, -42, 0, AlertLevel::None, true));
 
-  return output;
-}
+  // The downstream wadi node is not heard from in time: its all clear goes out when
+  // the gateway has held it long enough, and again in answer to its heartbeat. Then
+  // the node says that it holds no alert level either.
+  site.runMs(site.allClearSettleMs());
+  downstreamHeartbeat.heartbeat.lastLevelMm = 240;
+  site.transmit(downstreamWadiNode, downstreamHeartbeat);
+  site.transmit(downstreamWadiNode, reading(240, -8, 0, AlertLevel::None, false));
+  site.runMs(site.allClearSettleMs());
 
-// Where the contract examples are. The tests are started from firmware/ (pio test) or
-// from the repository root (pio test -d firmware); anywhere else, name the directory
-// in WADIWATCH_CONTRACT_DIR.
-std::string contractDirectory() {
-  if (const char* named = std::getenv(kDirectoryVariable)) return named;
-  for (const char* candidate : {"../docs/gateway-contract", "docs/gateway-contract"}) {
-    if (std::ifstream(std::string(candidate) + "/" + kLandmarkFile).good()) return candidate;
-  }
-  TEST_FAIL_MESSAGE("docs/gateway-contract not found: set WADIWATCH_CONTRACT_DIR");
-  return std::string();
-}
-
-std::vector<std::string> linesOf(const std::string& path) {
-  std::ifstream file(path, std::ios::binary);
-  TEST_ASSERT_TRUE_MESSAGE(file.good(), ("cannot read " + path).c_str());
-  std::vector<std::string> lines;
-  std::string line;
-  while (std::getline(file, line)) {
-    // A checkout on Windows may have turned the line ends into CR LF.
-    if (!line.empty() && line.back() == '\r') line.pop_back();
-    if (!line.empty()) lines.push_back(line);
-  }
-  return lines;
+  return site.uplink.published();
 }
 
 void write(const std::string& path, const std::vector<std::string>& lines) {
@@ -239,6 +265,42 @@ static void test_the_gateway_output_file_is_what_the_gateway_core_produces() {
     TEST_ASSERT_EQUAL_STRING_MESSAGE(committed[i].c_str(), produced[i].c_str(), advice);
   }
   TEST_ASSERT_EQUAL_UINT_MESSAGE(committed.size(), produced.size(), advice);
+}
+
+// The all clears of the file come out of the gateway's own radio and uplink: each
+// wadi node of the wadi is named in a message that carries the gateway's identifier
+// and the number of the command.
+static void test_the_all_clears_in_the_gateway_output_are_the_gateway_s_own_for_every_wadi_node() {
+  const std::vector<std::string> produced = gatewayOutput();
+  const wadiwatch::SiteConfig& site = wadiwatch::prototypeSite();
+  const std::string fromTheGateway =
+      "\"kind\":\"all_clear\",\"node\":" + std::to_string(site.gateway.id) + ",";
+
+  for (const NodeId cleared : {site.wadiNode.id, site.downstreamWadiNode.id}) {
+    const std::string naming = "\"wadi_node\":" + std::to_string(cleared) + ",\"command\":";
+    size_t found = 0;
+    for (const std::string& message : produced) {
+      if (message.find(fromTheGateway) != std::string::npos &&
+          message.find(naming) != std::string::npos) {
+        ++found;
+      }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found >= 1, std::to_string(cleared).c_str());
+  }
+}
+
+static void test_the_gateway_reads_every_command_of_the_shared_examples() {
+  const std::vector<std::string> commands = backendCommands();
+  TEST_ASSERT_FALSE(commands.empty());
+  for (const std::string& command : commands) {
+    AllClearCommand read;
+    TEST_ASSERT_TRUE_MESSAGE(
+        wadiwatch::parseAllClearCommand(command.data(), command.size(), read), command.c_str());
+    // And the harness that stands for the backend in the scenario tests words its
+    // commands exactly so.
+    TEST_ASSERT_EQUAL_STRING(
+        command.c_str(), TestSite::allClearCommand(read.command, read.issuedAt, read.wadi).c_str());
+  }
 }
 
 static void test_the_gateway_output_covers_every_message_kind() {
@@ -274,6 +336,8 @@ static void test_the_gateway_output_covers_every_node_the_gateway_hears() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_the_gateway_output_file_is_what_the_gateway_core_produces);
+  RUN_TEST(test_the_all_clears_in_the_gateway_output_are_the_gateway_s_own_for_every_wadi_node);
+  RUN_TEST(test_the_gateway_reads_every_command_of_the_shared_examples);
   RUN_TEST(test_the_gateway_output_covers_every_message_kind);
   RUN_TEST(test_the_gateway_output_covers_every_node_the_gateway_hears);
   return UNITY_END();

@@ -103,11 +103,11 @@
     </table>
   </section>
 
-  <!-- Alert log, sign-in and acknowledgement: alert_log.js and alert_log.css -->
+  <!-- Alert log, sign-in, acknowledgement and the all clear: alert_log.js and alert_log.css -->
   <section id="alert-log" class="alert-log" aria-labelledby="alert-log-title">
     <div class="alert-log__head">
       <h2 id="alert-log-title">Alert log</h2>
-      <p class="alert-log__about">Every alert, test and all clear. Open to everyone; officers sign in to acknowledge an alert.</p>
+      <p class="alert-log__about">Every alert, test and all clear. Open to everyone; officers sign in to acknowledge an alert and to issue the all clear.</p>
       <p id="alert-log-status" class="alert-log__status" role="status"></p>
     </div>
     <table class="alert-log__table">
@@ -129,7 +129,7 @@
   <dialog id="sign-in" class="sign-in" aria-labelledby="sign-in-title">
     <form id="sign-in-form" class="sign-in__form" method="dialog">
       <h2 id="sign-in-title">Officer sign-in</h2>
-      <p id="sign-in-note" class="sign-in__note">Sign in to acknowledge alerts.</p>
+      <p id="sign-in-note" class="sign-in__note">Sign in to acknowledge alerts and to issue the all clear.</p>
       <label for="sign-in-name">Account name</label>
       <input id="sign-in-name" name="name" type="text" required maxlength="32"
              autocomplete="username" autocapitalize="none" spellcheck="false">
@@ -140,6 +140,21 @@
       <div class="sign-in__actions">
         <button id="sign-in-cancel" type="button" class="sign-in__cancel">Cancel</button>
         <button id="sign-in-submit" type="submit" class="sign-in__submit">Sign in</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Asked before an all clear is issued: it cannot be taken back. -->
+  <dialog id="all-clear-confirm" class="sign-in" aria-labelledby="all-clear-question">
+    <form id="all-clear-form" class="sign-in__form" method="dialog">
+      <h2 id="all-clear-question">Issue the all clear?</h2>
+      <p class="sign-in__note">
+        The sirens stop, the wadi nodes of this wadi drop their alert, and everyone who
+        received an alert for this event gets a closing SMS. It cannot be taken back.
+      </p>
+      <div class="sign-in__actions">
+        <button id="all-clear-cancel" type="button" class="sign-in__cancel">Cancel</button>
+        <button id="all-clear-submit" type="submit" class="sign-in__submit">Issue the all clear</button>
       </div>
     </form>
   </dialog>

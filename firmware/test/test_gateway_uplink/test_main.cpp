@@ -374,9 +374,22 @@ static void test_an_alert_is_forwarded_with_the_level_and_rate_of_rise_behind_it
   TEST_ASSERT_EQUAL_UINT(1, site.uplink.published().size());
   TEST_ASSERT_EQUAL_STRING(
       (messageStart(sent, receivedAt) +
-       R"(,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1})")
+       R"(,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1,"refresh":false})")
           .c_str(),
       site.uplink.published()[0].c_str());
+}
+
+static void test_an_alert_refresh_is_forwarded_as_one() {
+  QuietSite site;
+  site.transmit(site.wadiNodeOnAir, alert(AlertLevel::Warning));
+  Packet again = alert(AlertLevel::Warning);
+  again.alert.refresh = true;
+
+  site.transmit(site.wadiNodeOnAir, again);
+
+  TEST_ASSERT_EQUAL_UINT(2, site.uplink.published().size());
+  TEST_ASSERT_FALSE(flagField(site.uplink.published()[0], "refresh"));
+  TEST_ASSERT_TRUE(flagField(site.uplink.published()[1], "refresh"));
 }
 
 static void test_every_alert_level_is_forwarded_under_its_contract_name() {
@@ -484,19 +497,34 @@ static void test_the_second_wadi_node_is_judged_against_a_battery_threshold_of_i
   TEST_ASSERT_TRUE(flagField(published[1], "low_battery"));
 }
 
-static void test_an_all_clear_is_forwarded_naming_the_wadi_node_it_clears() {
+static void test_the_all_clear_the_gateway_transmits_is_forwarded_naming_the_wadi_node_and_the_command() {
   QuietSite site;
-  const NodeId cleared = site.wadiNodeOnAir.id;
 
-  // Only the gateway sends an all clear, and it does not hear itself. Until it does send
-  // one, any accepted packet of the kind shows what the gateway makes of it.
-  const Packet sent = site.transmit(site.sirenNodeOnAir, allClear(cleared));
-  const uint32_t receivedAt = site.wallClock.unixSeconds();
+  // The gateway does not hear itself: what it forwards is its own packet, dated with
+  // the time it first transmitted it.
+  const uint32_t command = site.issueAllClear();
+  std::vector<uint32_t> transmittedAt;
+  for (uint64_t elapsed = 0; elapsed < site.allClearSettleMs(); elapsed += TestSite::kStepMs) {
+    site.runMs(TestSite::kStepMs);
+    while (transmittedAt.size() < site.packetsOnAir(PacketKind::AllClear).size()) {
+      transmittedAt.push_back(site.wallClock.unixSeconds());
+    }
+  }
+  site.runMs(kUplinkPromptMs);
 
-  TEST_ASSERT_EQUAL_UINT(1, site.uplink.published().size());
-  TEST_ASSERT_EQUAL_STRING(
-      (messageStart(sent, receivedAt) + ",\"wadi_node\":" + number(cleared) + "}").c_str(),
-      site.uplink.published()[0].c_str());
+  // One packet and one message for each wadi node of the wadi.
+  const std::vector<Packet> sent = site.packetsOnAir(PacketKind::AllClear);
+  TEST_ASSERT_EQUAL_UINT(2, sent.size());
+  TEST_ASSERT_EQUAL_UINT(sent.size(), site.uplink.published().size());
+  TEST_ASSERT_TRUE(sent[0].allClear.wadiNode != sent[1].allClear.wadiNode);
+  for (size_t i = 0; i < sent.size(); ++i) {
+    TEST_ASSERT_EQUAL_UINT16(site.config.gateway.id, sent[i].sender);
+    TEST_ASSERT_EQUAL_STRING(
+        (messageStart(sent[i], transmittedAt[i]) + ",\"wadi_node\":" +
+         number(sent[i].allClear.wadiNode) + ",\"command\":" + number(command) + "}")
+            .c_str(),
+        site.uplink.published()[i].c_str());
+  }
 }
 
 static void test_a_test_packet_is_forwarded_as_a_test_message() {
@@ -1122,13 +1150,14 @@ int main(int, char**) {
   RUN_TEST(test_a_reading_of_a_falling_dry_wadi_is_forwarded_exactly);
   RUN_TEST(test_the_largest_values_a_reading_can_carry_are_forwarded_exactly);
   RUN_TEST(test_an_alert_is_forwarded_with_the_level_and_rate_of_rise_behind_it);
+  RUN_TEST(test_an_alert_refresh_is_forwarded_as_one);
   RUN_TEST(test_every_alert_level_is_forwarded_under_its_contract_name);
   RUN_TEST(test_an_acknowledgement_is_forwarded_naming_the_alert_it_answers);
   RUN_TEST(test_a_wadi_node_heartbeat_is_forwarded_with_its_health_and_last_level);
   RUN_TEST(test_a_siren_node_heartbeat_is_forwarded_with_its_flags_and_no_level);
   RUN_TEST(test_a_battery_below_the_threshold_of_its_node_is_reported_as_low);
   RUN_TEST(test_the_second_wadi_node_is_judged_against_a_battery_threshold_of_its_own);
-  RUN_TEST(test_an_all_clear_is_forwarded_naming_the_wadi_node_it_clears);
+  RUN_TEST(test_the_all_clear_the_gateway_transmits_is_forwarded_naming_the_wadi_node_and_the_command);
   RUN_TEST(test_a_test_packet_is_forwarded_as_a_test_message);
   RUN_TEST(test_no_message_is_longer_than_the_contract_allows);
   RUN_TEST(test_packets_the_gateway_refuses_are_not_forwarded);

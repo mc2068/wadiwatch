@@ -8,6 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .all_clear_api import add_all_clear_routes
 from .backend import REJECTED
 from .health_api import health_router
 from .officer_api import add_officer_routes
@@ -36,6 +37,8 @@ def create_app(backend, uplink=None, secure_cookies=False):
     app = FastAPI(title="WadiWatch backend", lifespan=lifespan)
     # Alert log, sign-in and acknowledgement (ticket #13) are in officer_api.py.
     add_officer_routes(app, backend, secure_cookies=secure_cookies)
+    # The all clear (ticket #14) is in all_clear_api.py.
+    add_all_clear_routes(app, backend)
 
     @app.get("/api/nodes")
     def nodes():

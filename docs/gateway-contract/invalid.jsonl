@@ -49,4 +49,10 @@
 {"why":"all clear sent by a node other than the gateway","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":257,\"counter\":5,\"ts\":1791594000,\"wadi_node\":257}"}
 {"why":"all clear that does not name the wadi node","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000}"}
 {"why":"all clear for a siren node","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi_node\":513}"}
+{"why":"alert whose refresh flag is not true or false","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"warning\",\"refresh\":1}"}
+{"why":"refresh flag in a reading","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"refresh\":true}"}
+{"why":"all clear with command number zero","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi_node\":257,\"command\":0}"}
+{"why":"all clear whose command number is not a whole number","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi_node\":257,\"command\":\"41\"}"}
+{"why":"all clear that names a wadi instead of a wadi node","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi\":1,\"command\":41}"}
+{"why":"the backend's own all clear command, sent up instead of down","raw":"{\"v\":1,\"kind\":\"all_clear\",\"command\":41,\"ts\":1791594000,\"wadi\":1}"}
 {"why":"test from a wadi node","raw":"{\"v\":1,\"kind\":\"test\",\"node\":257,\"counter\":20,\"ts\":1791597600}"}

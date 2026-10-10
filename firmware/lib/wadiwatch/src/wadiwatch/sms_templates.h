@@ -27,4 +27,11 @@ const char* alertLevelName(Language language, AlertLevel alertLevel);
 size_t renderAlertSms(Language language, AlertLevel alertLevel, const char* wadiName, char* buffer,
                       size_t capacity);
 
+// What the all clear is called in SMS, in `language`.
+const char* allClearName(Language language);
+
+// Writes the closing SMS: it tells a recipient that the event at the wadi called
+// `wadiName` is over. Same rules as renderAlertSms for the buffer and the length.
+size_t renderAllClearSms(Language language, const char* wadiName, char* buffer, size_t capacity);
+
 }  // namespace wadiwatch
