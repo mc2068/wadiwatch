@@ -588,6 +588,55 @@ static void test_malformed_frames_send_no_sms() {
   TEST_ASSERT_EQUAL_UINT(2, site.modem.sent().size());
 }
 
+// In storm mode the wadi node sends a reading with every measurement. The gateway hears
+// them all; they are measurements for the dashboard, not alerts.
+static void test_readings_from_a_storm_that_raises_no_alert_send_no_sms() {
+  SmsSite site;
+  site.levelSensor.setWaterLevelCm(thresholdCm(site, AlertLevel::Watch) / 2.0f);
+
+  // A little rain, far short of the Watch rainfall: storm mode and nothing more.
+  site.rainGauge.tip();
+  site.runMinutes(20);
+
+  TEST_ASSERT_TRUE(site.packetsOnAir(PacketKind::Reading).size() > 0);
+  TEST_ASSERT_EQUAL_UINT(0, site.packetsOnAir(PacketKind::Alert).size());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
+
+  // And the alert that follows all those readings is acted on as usual.
+  floodTo(site, AlertLevel::Watch);
+  letSmsGoOut(site);
+  TEST_ASSERT_EQUAL_UINT(1, smsCountTo(site, kOfficialFrench));
+  TEST_ASSERT_EQUAL_UINT(1, smsCountTo(site, kOfficialArabic));
+  TEST_ASSERT_EQUAL_UINT(2, site.modem.sent().size());
+}
+
+static void test_a_reading_that_carries_an_alert_level_is_not_an_alert() {
+  SmsSite site;
+  floodTo(site, AlertLevel::Warning);
+  letSmsGoOut(site);
+  TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
+
+  // The gateway is power-cycled and no longer knows of the event. The readings it hears
+  // from now on say Warning, which would be news to it; but only an alert packet is.
+  site.restartGateway();
+  const size_t readingsBefore = site.packetsOnAir(PacketKind::Reading).size();
+  site.runMinutes(10);
+
+  const std::vector<Packet> readings = site.packetsOnAir(PacketKind::Reading);
+  TEST_ASSERT_TRUE(readings.size() > readingsBefore);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(AlertLevel::Warning),
+                        static_cast<int>(readings.back().reading.alertLevel));
+  TEST_ASSERT_EQUAL_UINT(1, alertsOnAirAt(site, AlertLevel::Warning));
+  TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
+
+  // The next alert packet starts the event the gateway had forgotten.
+  floodTo(site, AlertLevel::Evacuate);
+  letSmsGoOut(site);
+  TEST_ASSERT_EQUAL_UINT(4 + 6, site.modem.sent().size());
+}
+
 static void test_on_the_prototype_site_evacuate_reaches_every_committed_recipient() {
   TestSite site;
   const RecipientList& committed = wadiwatch::prototypeRecipients();
@@ -639,6 +688,8 @@ int main(int, char**) {
   RUN_TEST(test_a_signed_alert_from_a_node_outside_the_site_sends_no_sms);
   RUN_TEST(test_a_replayed_alert_sends_no_sms);
   RUN_TEST(test_malformed_frames_send_no_sms);
+  RUN_TEST(test_readings_from_a_storm_that_raises_no_alert_send_no_sms);
+  RUN_TEST(test_a_reading_that_carries_an_alert_level_is_not_an_alert);
   RUN_TEST(test_on_the_prototype_site_evacuate_reaches_every_committed_recipient);
   RUN_TEST(test_the_committed_recipient_list_holds_only_fake_numbers);
   return UNITY_END();
