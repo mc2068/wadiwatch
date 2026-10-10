@@ -6,6 +6,7 @@
 // simulation step at a time, so they assume the configured durations are whole steps.
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <unity.h>
@@ -13,6 +14,8 @@
 #include "wadiwatch/alert_engine.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/radio_config.h"
+#include "wadiwatch/recipients.h"
+#include "wadiwatch/sms_templates.h"
 #include "wadiwatch_testing/test_site.h"
 
 using wadiwatch::AlertLevel;
@@ -704,15 +707,57 @@ static void test_airtime_of_each_wadi_node_in_storm_mode_stays_under_the_duty_cy
     for (size_t i = 0; i < 2; ++i) {
       const double usedUs = static_cast<double>(timeOnAirUs(site, nodes[i].radio, firstFrame[i]));
       TEST_ASSERT_TRUE_MESSAGE(usedUs < allowedUs, "a wadi node exceeded the duty-cycle limit");
-      // The node really was sending all along: its alert once per re-send interval.
+      // The node really was sending all along: once per re-send interval its alert,
+      // as many times as an alert goes out, besides its readings.
       const size_t frames = nodes[i].radio.sent().size() - firstFrame[i];
       if (period > 1) {
-        TEST_ASSERT_TRUE(frames >= periodMs / nodes[i].config.alertResendIntervalMs);
+        TEST_ASSERT_TRUE(frames >= nodes[i].config.alertRepeat.transmissions * periodMs /
+                                       nodes[i].config.alertResendIntervalMs);
       }
       firstFrame[i] = nodes[i].radio.sent().size();
     }
   }
   for (const Node& node : nodes) ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alertLevelOf(site, node));
+}
+
+// --- The gateway ---
+
+static void test_the_two_wadi_nodes_are_one_event_for_the_gateway_and_the_confirmed_evacuate_is_told_once() {
+  // The prototype site with its committed recipients: both wadi nodes are on its one wadi.
+  TestSite site;
+  const Node upstream = upstreamNode(site);
+  const Node downstream = downstreamNode(site);
+  const wadiwatch::WadiConfig& wadi = site.config.gateway.wadis[0];
+  const uint64_t resendIntervalMs = upstream.config.alertResendIntervalMs;
+
+  holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
+  holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
+  waitForAlertLevel(site, downstream, AlertLevel::Evacuate, resendIntervalMs + kStepMs);
+  // Both nodes go on sending their alerts again; the gateway has time to hand over its SMS.
+  site.runMs(5ull * resendIntervalMs);
+
+  size_t registered = 0;
+  for (const wadiwatch::Recipient& recipient : site.recipients.recipients) {
+    if (recipient.phoneNumber[0] == '\0') continue;
+    ++registered;
+    std::vector<std::string> texts;
+    for (const wadiwatch::testing::Sms& sms : site.modem.sent()) {
+      if (sms.phoneNumber == recipient.phoneNumber) texts.push_back(sms.text);
+    }
+    // Whoever is told at Warning was told once, though two wadi nodes reached it;
+    // everyone was told of the Evacuate that only the downstream node raised.
+    const bool toldAtWarning = recipient.group == wadiwatch::RecipientGroup::Official ||
+                               recipient.nearestWadi == wadi.id;
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(toldAtWarning ? 2 : 1, texts.size(), recipient.phoneNumber);
+    char evacuate[wadiwatch::kMaxSmsTextLength + 1];
+    const bool arabic = recipient.language == wadiwatch::Language::Arabic;
+    wadiwatch::renderAlertSms(recipient.language, AlertLevel::Evacuate,
+                              arabic ? wadi.nameArabic : wadi.nameFrench, evacuate,
+                              sizeof(evacuate));
+    TEST_ASSERT_EQUAL_STRING(evacuate, texts.back().c_str());
+  }
+  TEST_ASSERT_TRUE(registered > 0);
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
 }
 
 int main(int, char**) {
@@ -745,5 +790,6 @@ int main(int, char**) {
   RUN_TEST(test_a_node_with_no_upstream_node_keeps_its_receiver_off_through_a_flood);
   RUN_TEST(test_at_warning_the_downstream_node_listens_until_the_upstream_node_confirms);
   RUN_TEST(test_airtime_of_each_wadi_node_in_storm_mode_stays_under_the_duty_cycle_limit);
+  RUN_TEST(test_the_two_wadi_nodes_are_one_event_for_the_gateway_and_the_confirmed_evacuate_is_told_once);
   return UNITY_END();
 }

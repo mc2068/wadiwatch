@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "wadiwatch/alert_engine.h"
+#include "wadiwatch/alert_repeater.h"
 #include "wadiwatch/level_measurement.h"
 #include "wadiwatch/operating_mode.h"
 #include "wadiwatch/packet.h"
@@ -29,9 +30,12 @@ struct WadiNodeConfig {
   RainConfig rain;
   RateOfRiseConfig rateOfRise;
   uint32_t heartbeatIntervalMs;
+  // How each alert is repeated on the air.
+  AlertRepeatConfig alertRepeat;
   // Which wadi node is upstream of this one, and how long this one listens for it.
   UpstreamConfig upstream;
-  // While at Warning or above, the node sends its alert again this long after it last sent it.
+  // While at Warning or above, the node sends its alert again this long after it last
+  // sent it. Must be longer than an alert takes to go out all its times.
   uint32_t alertResendIntervalMs;
 };
 
@@ -40,6 +44,12 @@ struct SirenNodeConfig {
   // Siren pattern 1 (intermittent), sounded at Warning: on for this long, then off for this long.
   uint32_t intermittentOnMs;
   uint32_t intermittentOffMs;
+  // A latched Warning or Evacuate that hears no alert from its wadi node for this
+  // long falls silent. Must be several times the wadi node's alert re-send interval.
+  uint32_t alertRefreshTimeoutMs;
+  // A test started with the button ends by itself after this long.
+  uint32_t testDurationMs;
+  uint32_t heartbeatIntervalMs;
 };
 
 // Identifies a wadi within the site. Wadi nodes are mounted over a wadi,

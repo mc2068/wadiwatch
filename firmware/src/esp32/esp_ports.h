@@ -24,3 +24,11 @@ class UnconnectedStorage : public wadiwatch::PersistentStorage {
   bool load(uint32_t, uint32_t&) override { return false; }
   void store(uint32_t, uint32_t) override {}
 };
+
+// Stands in for the battery, signal and tamper readings until their adapters are written.
+class UnmeasuredNodeHealth : public wadiwatch::NodeHealth {
+ public:
+  uint16_t batteryMillivolts() override { return 0; }
+  int8_t signalStrengthDbm() override { return 0; }
+  bool tamperDetected() override { return false; }
+};

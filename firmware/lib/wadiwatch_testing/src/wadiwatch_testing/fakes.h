@@ -209,6 +209,42 @@ class FakeSirenOutput : public SirenOutput {
   bool strobeOn_ = false;
 };
 
+// The button under the siren node's cover, with a technician's finger on it.
+class FakeButton : public Button {
+ public:
+  void press() { ++unreportedPresses_; }
+
+  bool wasPressed() override {
+    if (unreportedPresses_ == 0) return false;
+    --unreportedPresses_;
+    return true;
+  }
+
+ private:
+  size_t unreportedPresses_ = 0;
+};
+
+// Chance with the dice loaded: the scenario says what each draw gives.
+class FakeRandom : public RandomSource {
+ public:
+  // The lowest and the highest number any draw can give, whatever its bound.
+  enum : uint32_t { kLowest = 0, kHighest = UINT32_MAX };
+
+  // The coming draws, in order. A draw too high for its bound gives the highest
+  // number the bound allows. Once these are used up every draw gives the lowest.
+  void setDraws(const std::vector<uint32_t>& draws) { draws_.assign(draws.begin(), draws.end()); }
+
+  uint32_t below(uint32_t bound) override {
+    if (draws_.empty()) return kLowest;
+    const uint32_t draw = draws_.front();
+    draws_.pop_front();
+    return draw < bound ? draw : bound - 1;
+  }
+
+ private:
+  std::deque<uint32_t> draws_;
+};
+
 // Stands for a device's flash: it outlives the core it is given to, as flash outlives a restart.
 class FakeStorage : public PersistentStorage {
  public:

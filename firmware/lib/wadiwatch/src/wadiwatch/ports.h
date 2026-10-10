@@ -82,6 +82,24 @@ class SirenOutput {
   virtual void setStrobe(bool on) = 0;
 };
 
+// The test and silence button under the siren node's cover.
+class Button {
+ public:
+  virtual ~Button() = default;
+  // True once for each press of the button: a press is reported by one call
+  // and not again. Debouncing is the adapter's business.
+  virtual bool wasPressed() = 0;
+};
+
+// Chance, for whatever must not happen at a predictable moment.
+class RandomSource {
+ public:
+  virtual ~RandomSource() = default;
+  // A number picked evenly from 0 up to, but not including, `bound`.
+  // `bound` is at least 1.
+  virtual uint32_t below(uint32_t bound) = 0;
+};
+
 // Small values that must outlive deep sleep and restarts, such as message counters.
 // Each device has its own storage.
 class PersistentStorage {
@@ -99,6 +117,9 @@ enum class StorageRecord : uint16_t {
   SendCounter = 1,
   // Counter of the last packet accepted from another node. Index: that node's identifier.
   LastAcceptedCounter = 2,
+  // Alert level a siren node has latched from a wadi node, as the numeric value of
+  // the AlertLevel (zero for none). Index: that wadi node's identifier.
+  LatchedAlert = 3,
 };
 
 inline uint32_t storageKey(StorageRecord record, uint16_t index) {

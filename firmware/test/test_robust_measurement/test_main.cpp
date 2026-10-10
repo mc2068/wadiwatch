@@ -56,14 +56,22 @@ int toMm(float cm) { return static_cast<int>(std::lround(cm * 10.0f)); }
 // Rainfall as packets carry it: tenths of a millimetre.
 int toTenthsMm(float mm) { return static_cast<int>(std::lround(mm * 10.0f)); }
 
-// These scenarios follow the site's first wadi node. The second one stays in dry
-// mode on a dry bed throughout: it sends heartbeats of its own and no readings.
 std::vector<Packet> readingsOnAir(const TestSite& site) {
-  return site.packetsOnAir(PacketKind::Reading, site.config.wadiNode.id);
+  return site.packetsOnAir(PacketKind::Reading);
 }
 
-std::vector<Packet> heartbeatsOnAir(const TestSite& site) {
-  return site.packetsOnAir(PacketKind::Heartbeat, site.config.wadiNode.id);
+// Everything the wadi node has sent. The siren node transmits too: it
+// acknowledges alerts and sends heartbeats of its own.
+std::vector<Packet> wadiNodePackets(const TestSite& site) {
+  return site.packetsOnAirFrom(site.config.wadiNode.id);
+}
+
+std::vector<Packet> wadiNodeHeartbeats(const TestSite& site) {
+  std::vector<Packet> heartbeats;
+  for (const Packet& packet : wadiNodePackets(site)) {
+    if (packet.kind == PacketKind::Heartbeat) heartbeats.push_back(packet);
+  }
+  return heartbeats;
 }
 
 // Runs until the wadi node has taken its next measurement, whichever operating mode it is in.
@@ -207,7 +215,7 @@ static void test_outlier_pings_are_not_counted_as_discarded_readings() {
 
   site.runMs(site.config.wadiNode.heartbeatIntervalMs + kMinuteMs);
 
-  const std::vector<Packet> heartbeats = heartbeatsOnAir(site);
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT8(0, heartbeats[0].heartbeat.discardedReadings);
   TEST_ASSERT_INT_WITHIN(1, toMm(levelCm), heartbeats[0].heartbeat.lastLevelMm);
@@ -251,7 +259,7 @@ static void test_readings_outside_the_possible_range_are_discarded_and_counted_i
   site.runMs(config.heartbeatIntervalMs + kMinuteMs);
 
   TEST_ASSERT_EQUAL_UINT(0, site.levelSensor.scriptedPingsLeft());
-  const std::vector<Packet> heartbeats = heartbeatsOnAir(site);
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT8(discarded, heartbeats[0].heartbeat.discardedReadings);
   // The level is the one the possible pings gave.
@@ -259,7 +267,7 @@ static void test_readings_outside_the_possible_range_are_discarded_and_counted_i
   TEST_ASSERT_INT_WITHIN(1, toMm(levelCm), heartbeats[0].heartbeat.lastLevelMm);
   // Counted, not alerted on: the heartbeat is all the node has sent, and it never
   // left dry mode.
-  TEST_ASSERT_EQUAL_UINT(1, site.wadiNodeRadio.sent().size());
+  TEST_ASSERT_EQUAL_UINT(1, wadiNodePackets(site).size());
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
 }
 
@@ -271,7 +279,7 @@ static void test_a_ping_without_an_echo_is_counted_as_a_discarded_reading() {
 
   site.runMs(site.config.wadiNode.heartbeatIntervalMs + kMinuteMs);
 
-  const std::vector<Packet> heartbeats = heartbeatsOnAir(site);
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT8(1, heartbeats[0].heartbeat.discardedReadings);
   TEST_ASSERT_INT_WITHIN(1, toMm(levelCm), heartbeats[0].heartbeat.lastLevelMm);
@@ -289,7 +297,7 @@ static void test_each_heartbeat_counts_the_readings_discarded_since_the_one_befo
   for (int i = 0; i < 3; ++i) site.levelSensor.scriptPingDistanceCm(impossiblyFarCm(site));
   site.runMs(config.heartbeatIntervalMs);
 
-  const std::vector<Packet> heartbeats = heartbeatsOnAir(site);
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
   TEST_ASSERT_EQUAL_UINT(3, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT8(1, heartbeats[0].heartbeat.discardedReadings);
   TEST_ASSERT_EQUAL_UINT8(0, heartbeats[1].heartbeat.discardedReadings);
@@ -311,8 +319,8 @@ static void test_a_fouled_sensor_shows_up_in_the_heartbeat_and_never_as_a_flood(
   // The node stayed in dry mode and sent nothing but its heartbeat.
   TEST_ASSERT_EQUAL_UINT(measurementsInAnHour * kPingsPerMeasurement,
                          site.levelSensor.readCount());
-  TEST_ASSERT_EQUAL_UINT(1, site.wadiNodeRadio.sent().size());
-  const std::vector<Packet> heartbeats = heartbeatsOnAir(site);
+  TEST_ASSERT_EQUAL_UINT(1, wadiNodePackets(site).size());
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT8(measurementsInAnHour * kPingsPerMeasurement,
                           heartbeats[0].heartbeat.discardedReadings);
@@ -330,7 +338,7 @@ static void test_the_discard_count_in_a_heartbeat_stops_at_its_largest_value() {
   site.runMs(site.config.wadiNode.heartbeatIntervalMs + kMinuteMs);
 
   TEST_ASSERT_TRUE(site.levelSensor.readCount() > largestCount);
-  const std::vector<Packet> heartbeats = heartbeatsOnAir(site);
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT8(largestCount, heartbeats[0].heartbeat.discardedReadings);
   TEST_ASSERT_EQUAL_UINT(0, site.packetsOnAir(PacketKind::Alert).size());
@@ -587,8 +595,12 @@ static void test_a_reading_follows_the_alert_its_measurement_raised_and_carries_
 
   // No rain: the measurement that finds the flood is the one that starts storm mode.
   measureAt(site, levelCm);
+  // The alert goes out first, as many times as configured; the reading waits behind it.
+  const wadiwatch::AlertRepeatConfig& repeat = site.config.wadiNode.alertRepeat;
+  TEST_ASSERT_EQUAL_UINT(1, wadiNodePackets(site).size());
+  site.runMs(static_cast<uint64_t>(repeat.transmissions - 1) * repeat.maxSpacingMs);
 
-  const std::vector<Packet> packets = site.packetsOnAir();
+  const std::vector<Packet> packets = wadiNodePackets(site);
   TEST_ASSERT_EQUAL_UINT(2, packets.size());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(PacketKind::Alert),
                           static_cast<uint8_t>(packets[0].kind));

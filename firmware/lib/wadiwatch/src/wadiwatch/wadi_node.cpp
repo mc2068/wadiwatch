@@ -51,6 +51,7 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
                    NodeHealth& health,
                    Radio& radio,
                    PersistentStorage& storage,
+                   RandomSource& random,
                    TemperatureSensor* temperature)
     : config_(config),
       clock_(clock),
@@ -64,6 +65,7 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
       mode_(config.mode),
       rain_(config.rain, config.alertThresholds.watchRainWindowMs),
       rise_(config.rateOfRise),
+      alertRepeater_(config.alertRepeat, random),
       upstream_(config.upstream) {}
 
 void WadiNode::tick() {
@@ -95,16 +97,24 @@ void WadiNode::tick() {
   handleReceivedFrames();
   raiseAlertLevel(now);
   resendAlert(now);
-  // After the alert, so that the alert is first on the air and the reading
-  // carries the alert level its measurement raised.
-  if (readingDue_) sendReading(now);
-  switchReceiver(now);
+  repeatAlert(now);
 
-  if (now >= nextHeartbeatAtMs_) {
-    sendHeartbeat();
-    nextHeartbeatAtMs_ = now + config_.heartbeatIntervalMs;
+  // While an alert still has transmissions to come, nothing else leaves this node.
+  // A receiver refuses every packet older than the last one it accepted from the
+  // same sender, so a reading or a heartbeat heard in between would make it refuse
+  // the alert's further transmissions: the alert would be lost just when its first
+  // transmission was. What is held back goes out behind the last transmission, a
+  // few seconds late.
+  if (!alertRepeater_.pending()) {
+    // The reading carries the alert level its measurement raised.
+    if (readingDue_) sendReading(now);
+    if (now >= nextHeartbeatAtMs_) {
+      sendHeartbeat();
+      nextHeartbeatAtMs_ = now + config_.heartbeatIntervalMs;
+    }
   }
 
+  switchReceiver(now);
   sleepUntilNextDue(now);
 }
 
@@ -187,6 +197,8 @@ void WadiNode::announceAlert(uint64_t nowMs) {
 }
 
 // Each re-send is a new packet with its own counter: receivers accept it as a refresh.
+// It is an alert like any other, so it goes out several times and takes over from
+// whatever transmissions an earlier alert still had to come.
 void WadiNode::resendAlert(uint64_t nowMs) {
   if (hasAlertToResend() && nowMs >= nextAlertResendAtMs_) announceAlert(nowMs);
 }
@@ -212,10 +224,21 @@ void WadiNode::sendAlert() {
   packet.alert.alertLevel = alertLevel_;
   packet.alert.levelMm = levelMm(levelCm_);
   packet.alert.rateOfRiseMmPerMin = rateMmPerMin(rise_.rateCmPerMin());
-  send(packet);
+  // Every alert goes out several times. The further transmissions are these same
+  // bytes: a receiver acts on the first copy it hears and refuses the rest.
+  uint8_t frame[kMaxPacketSize];
+  const size_t length = send(packet, frame, sizeof(frame));
+  alertRepeater_.start(frame, length, clock_.nowMs());
 }
 
-// What the gateway forwards to the dashboard for its curves.
+void WadiNode::repeatAlert(uint64_t nowMs) {
+  size_t length = 0;
+  const uint8_t* frame = alertRepeater_.takeDue(nowMs, length);
+  if (frame != nullptr) transmit(frame, length);
+}
+
+// What the gateway forwards to the dashboard for its curves. A reading goes out
+// once: it is not life-safety traffic.
 void WadiNode::sendReading(uint64_t nowMs) {
   readingDue_ = false;
   Packet packet = Packet();
@@ -242,17 +265,34 @@ void WadiNode::sendHeartbeat() {
   send(packet);
 }
 
-// Everything this node transmits leaves through here: the codec stamps the
+// Every packet this node sends leaves through here: the codec stamps the
 // packet with the node's identifier and next counter, and signs it.
 void WadiNode::send(Packet& packet) {
   uint8_t frame[kMaxPacketSize];
-  const size_t length = codec_.encode(packet, frame, sizeof(frame));
+  send(packet, frame, sizeof(frame));
+}
+
+// The same, for a caller that keeps the frame to transmit it again. Returns the
+// frame's length, or 0 if nothing was sent.
+size_t WadiNode::send(Packet& packet, uint8_t* frame, size_t capacity) {
+  const size_t length = codec_.encode(packet, frame, capacity);
+  transmit(frame, length);
+  return length;
+}
+
+// The only place this node touches the radio's transmitter.
+void WadiNode::transmit(const uint8_t* frame, size_t length) {
   if (length > 0) radio_.send(frame, length);
 }
 
 void WadiNode::sleepUntilNextDue(uint64_t nowMs) {
-  uint64_t nextDueAtMs =
-      nextMeasurementAtMs_ < nextHeartbeatAtMs_ ? nextMeasurementAtMs_ : nextHeartbeatAtMs_;
+  uint64_t nextDueAtMs = nextMeasurementAtMs_;
+  if (alertRepeater_.pending()) {
+    // A heartbeat that falls due meanwhile waits for the alert's last transmission.
+    if (alertRepeater_.dueAtMs() < nextDueAtMs) nextDueAtMs = alertRepeater_.dueAtMs();
+  } else if (nextHeartbeatAtMs_ < nextDueAtMs) {
+    nextDueAtMs = nextHeartbeatAtMs_;
+  }
   if (hasAlertToResend() && nextAlertResendAtMs_ < nextDueAtMs) {
     nextDueAtMs = nextAlertResendAtMs_;
   }

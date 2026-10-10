@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "wadiwatch/alert_repeater.h"
 #include "wadiwatch/operating_mode.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/ports.h"
@@ -24,13 +25,14 @@ class WadiNode {
            NodeHealth& health,
            Radio& radio,
            PersistentStorage& storage,
+           RandomSource& random,
            // Optional hardware: without it the level is not corrected for temperature.
            TemperatureSensor* temperature = nullptr);
 
   // Call whenever the device is awake. Does whatever is due (counting rain,
-  // measuring, listening for the upstream node, sending an alert or a heartbeat),
-  // then asks to sleep until the next thing is due. Safe to call early: a
-  // rain-gauge tip or a received frame wakes the device before its time.
+  // measuring, listening for the upstream node, sending or repeating an alert,
+  // sending a heartbeat), then asks to sleep until the next thing is due. Safe to
+  // call early: a rain-gauge tip or a received frame wakes the device before its time.
   void tick();
 
  private:
@@ -43,9 +45,12 @@ class WadiNode {
   void resendAlert(uint64_t nowMs);
   void switchReceiver(uint64_t nowMs);
   void sendAlert();
+  void repeatAlert(uint64_t nowMs);
   void sendReading(uint64_t nowMs);
   void sendHeartbeat();
   void send(Packet& packet);
+  size_t send(Packet& packet, uint8_t* frame, size_t capacity);
+  void transmit(const uint8_t* frame, size_t length);
   void sleepUntilNextDue(uint64_t nowMs);
 
   WadiNodeConfig config_;
@@ -60,6 +65,7 @@ class WadiNode {
   ModeController mode_;
   RainWindow rain_;
   RateOfRise rise_;
+  AlertRepeater alertRepeater_;
   UpstreamLink upstream_;
   bool receiverOn_ = false;
   uint64_t nextAlertResendAtMs_ = 0;
@@ -69,7 +75,9 @@ class WadiNode {
   uint32_t tipsCounted_ = 0;
   bool hasLevel_ = false;
   float levelCm_ = 0;
-  // A storm-mode measurement has been taken and not yet sent as a reading.
+  // A storm-mode measurement has been taken and not yet sent as a reading. The
+  // reading of a measurement that raised an alert waits for the alert's last
+  // transmission.
   bool readingDue_ = false;
   // Pings discarded since the last heartbeat. Stops counting at its largest value.
   uint8_t discardedReadings_ = 0;

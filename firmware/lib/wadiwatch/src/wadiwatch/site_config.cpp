@@ -81,6 +81,11 @@ SiteConfig makePrototypeSite() {
               /* windowMs */ 5u * kMinuteMs,
           },
           /* heartbeatIntervalMs */ 60u * kMinuteMs,
+          /* alertRepeat */ {
+              /* transmissions */ 3,
+              /* minSpacingMs */ 1000u,
+              /* maxSpacingMs */ 4000u,
+          },
           /* upstream */ {
               /* node */ kNoNode,
               /* receiveWindowMs */ 3000u,
@@ -92,6 +97,9 @@ SiteConfig makePrototypeSite() {
           /* id */ kSirenNodeId,
           /* intermittentOnMs */ 2000u,
           /* intermittentOffMs */ 2000u,
+          /* alertRefreshTimeoutMs */ 30u * kMinuteMs,
+          /* testDurationMs */ 30u * 1000u,
+          /* heartbeatIntervalMs */ 60u * kMinuteMs,
       },
       /* gateway */ {
           /* id */ kGatewayNodeId,
@@ -100,8 +108,8 @@ SiteConfig makePrototypeSite() {
                   /* id */ kWadi,
                   /* nameArabic */ "وادي تجريبي",
                   /* nameFrench */ "Oued Démo",
-                  /* wadiNodes */ {kWadiNodeId},
-                  /* wadiNodeCount */ 1,
+                  /* wadiNodes */ {kWadiNodeId, kDownstreamWadiNodeId},
+                  /* wadiNodeCount */ 2,
               },
           },
           /* wadiCount */ 1,
@@ -109,9 +117,9 @@ SiteConfig makePrototypeSite() {
       },
       /* auth */ {},
       // A 24-byte packet takes 113 ms on the air with these settings. In storm mode at
-      // Warning a wadi node may send four a minute (its alert three times and a reading),
-      // which is 0.75% of the time. One spreading factor higher (206 ms a packet) would
-      // break the duty-cycle limit.
+      // Warning or above a wadi node sends four a minute (its alert three times and a
+      // reading), which is 0.75% of the time. One spreading factor higher (206 ms a
+      // packet) would break the duty-cycle limit.
       /* radio */ {
           /* frequencyHz */ 868100000u,
           /* transmitPowerDbm */ 14,

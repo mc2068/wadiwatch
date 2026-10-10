@@ -19,19 +19,20 @@ class UnconnectedRainGauge : public wadiwatch::RainGauge {
   uint32_t tipCount() override { return 0; }
 };
 
-// Stands in for the battery, signal and tamper readings until their adapters are written.
-class UnmeasuredNodeHealth : public wadiwatch::NodeHealth {
- public:
-  uint16_t batteryMillivolts() override { return 0; }
-  int8_t signalStrengthDbm() override { return 0; }
-  bool tamperDetected() override { return false; }
-};
-
 // Stands in for deep sleep until its adapter is written: the device stays awake
 // and the core is simply ticked again before its time.
 class StayAwake : public wadiwatch::SleepControl {
  public:
   void requestSleepMs(uint64_t) override {}
+};
+
+// Arduino's random(), which on the ESP32 draws from the hardware random number
+// generator as long as randomSeed() is never called.
+class ArduinoRandom : public wadiwatch::RandomSource {
+ public:
+  uint32_t below(uint32_t bound) override {
+    return static_cast<uint32_t>(random(static_cast<long>(bound)));
+  }
 };
 
 EspClock espClock;
@@ -41,6 +42,8 @@ UnconnectedRainGauge rainGauge;
 UnmeasuredNodeHealth nodeHealth;
 UnconnectedRadio radio;
 UnconnectedStorage storage;
+ArduinoRandom randomSource;
+
 // Which of the site's wadi nodes this device is: a member of SiteConfig. The
 // wadi_node_downstream environment sets it to the second wadi node.
 #ifndef WADIWATCH_WADI_NODE
@@ -55,7 +58,8 @@ wadiwatch::WadiNode node(wadiwatch::prototypeSite().WADIWATCH_WADI_NODE,
                          rainGauge,
                          nodeHealth,
                          radio,
-                         storage);
+                         storage,
+                         randomSource);
 
 }  // namespace
 

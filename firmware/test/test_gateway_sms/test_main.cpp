@@ -153,6 +153,21 @@ Frame signedAlert(const SiteAuth& auth, NodeId claimedSender) {
   return Frame(buffer, buffer + length);
 }
 
+// The longest that the further transmissions of an alert can take, counted from the first.
+uint64_t repeatWindowMs(const TestSite& site) {
+  const wadiwatch::AlertRepeatConfig& repeat = site.config.wadiNode.alertRepeat;
+  return static_cast<uint64_t>(repeat.transmissions - 1) * repeat.maxSpacingMs;
+}
+
+// The siren node's heartbeats. The wadi node sends heartbeats of its own.
+std::vector<Packet> sirenNodeHeartbeats(const TestSite& site) {
+  std::vector<Packet> heartbeats;
+  for (const Packet& packet : site.packetsOnAirFrom(site.config.sirenNode.id)) {
+    if (packet.kind == PacketKind::Heartbeat) heartbeats.push_back(packet);
+  }
+  return heartbeats;
+}
+
 // Gives the gateway the time it is allowed to hand its SMS to the modem.
 void letSmsGoOut(TestSite& site) { site.runMs(kSmsTargetMs); }
 
@@ -642,6 +657,101 @@ static void test_a_reading_that_carries_an_alert_level_is_not_an_alert() {
   TEST_ASSERT_EQUAL_UINT(2 + 4, site.modem.sent().size());
 }
 
+// The wadi node transmits every alert several times and the siren node answers each
+// alert with an acknowledgement. The gateway hears all of it; a change of alert
+// level is still one SMS to each recipient it concerns.
+static void test_an_alert_transmitted_several_times_and_acknowledged_sends_each_recipient_one_sms() {
+  SmsSite site;
+  const size_t transmissions = site.config.wadiNode.alertRepeat.transmissions;
+  TEST_ASSERT_TRUE(transmissions > 1);
+
+  const AlertLevel alertLevels[] = {AlertLevel::Watch, AlertLevel::Warning, AlertLevel::Evacuate};
+  for (const AlertLevel alertLevel : alertLevels) {
+    floodTo(site, alertLevel);
+    site.runMs(repeatWindowMs(site));
+    letSmsGoOut(site);
+  }
+
+  // The three changes of level went out as alerts, and from Warning up the alert was
+  // sent again while it stayed in force. Each of them went out as many times as
+  // configured, and each was acknowledged.
+  const std::vector<Frame> alerts = site.framesOnAir(PacketKind::Alert);
+  TEST_ASSERT_TRUE(alerts.size() > 3);
+  for (const Frame& alert : alerts) {
+    TEST_ASSERT_EQUAL_UINT(transmissions, site.timesTransmitted(alert));
+  }
+  const std::vector<Packet> acknowledgements = site.packetsOnAir(PacketKind::Acknowledgement);
+  TEST_ASSERT_EQUAL_UINT(alerts.size(), acknowledgements.size());
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(AlertLevel::Evacuate),
+                        static_cast<int>(acknowledgements.back().acknowledgement.alertLevel));
+
+  // Officials heard of all three levels, residents near the wadi of two, the rest of one.
+  TEST_ASSERT_EQUAL_UINT(3, smsCountTo(site, kOfficialFrench));
+  TEST_ASSERT_EQUAL_UINT(3, smsCountTo(site, kOfficialArabic));
+  TEST_ASSERT_EQUAL_UINT(2, smsCountTo(site, kResidentArabic));
+  TEST_ASSERT_EQUAL_UINT(2, smsCountTo(site, kResidentFrench));
+  TEST_ASSERT_EQUAL_UINT(1, smsCountTo(site, kFarResidentArabic));
+  TEST_ASSERT_EQUAL_UINT(1, smsCountTo(site, kFarResidentFrench));
+  TEST_ASSERT_EQUAL_UINT(3 + 3 + 2 + 2 + 1 + 1, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
+}
+
+static void test_with_the_first_transmission_of_an_alert_lost_its_sms_go_out_once_on_a_repeat() {
+  SmsSite site;
+  site.air.dropNext(1);
+
+  floodTo(site, AlertLevel::Evacuate);
+
+  // The alert has gone out once and was lost: the gateway has nothing to send.
+  const Frame alert = site.framesOnAir(PacketKind::Alert).front();
+  TEST_ASSERT_EQUAL_UINT(1, site.timesTransmitted(alert));
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.sent().size());
+
+  site.runMs(repeatWindowMs(site));
+  letSmsGoOut(site);
+
+  // It heard one of the further transmissions, and the one after that changed nothing.
+  TEST_ASSERT_EQUAL_UINT(site.config.wadiNode.alertRepeat.transmissions,
+                         site.timesTransmitted(alert));
+  for (const Recipient& recipient : kEveryone) {
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(1, smsCountTo(site, recipient), recipient.phoneNumber);
+  }
+  TEST_ASSERT_EQUAL_UINT(6, site.modem.sent().size());
+}
+
+// A siren node transmits too: a test packet when its button is pressed, an hourly
+// heartbeat, an acknowledgement that names an alert level, and a heartbeat that
+// reports a lost alert refresh. None of them is an alert.
+static void test_what_the_siren_node_transmits_sends_no_sms() {
+  SmsSite site;
+  const wadiwatch::SirenNodeConfig& sirenNode = site.config.sirenNode;
+
+  // With no alert anywhere: a test from the button, and a heartbeat.
+  site.sirenButton.press();
+  site.runMs(sirenNode.heartbeatIntervalMs + kSmsTargetMs);
+  TEST_ASSERT_EQUAL_UINT(1, site.packetsOnAir(PacketKind::Test).size());
+  TEST_ASSERT_FALSE(sirenNodeHeartbeats(site).empty());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
+
+  // During an event the Warning is told once.
+  floodTo(site, AlertLevel::Warning);
+  letSmsGoOut(site);
+  TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
+
+  // The wadi node is lost. The siren node waits for a refresh, gives up, says so in a
+  // heartbeat and goes on saying so every hour.
+  site.unplugWadiNode();
+  const size_t acknowledged = site.packetsOnAir(PacketKind::Acknowledgement).size();
+  TEST_ASSERT_TRUE(acknowledged >= 1);
+  site.runMs(static_cast<uint64_t>(sirenNode.alertRefreshTimeoutMs) + sirenNode.heartbeatIntervalMs);
+
+  TEST_ASSERT_EQUAL_UINT(acknowledged, site.packetsOnAir(PacketKind::Acknowledgement).size());
+  TEST_ASSERT_TRUE(sirenNodeHeartbeats(site).back().heartbeat.alertRefreshLost);
+  TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
+  TEST_ASSERT_EQUAL_UINT(0, site.modem.refused().size());
+}
+
 static void test_on_the_prototype_site_evacuate_reaches_every_committed_recipient() {
   TestSite site;
   const RecipientList& committed = wadiwatch::prototypeRecipients();
@@ -695,6 +805,9 @@ int main(int, char**) {
   RUN_TEST(test_malformed_frames_send_no_sms);
   RUN_TEST(test_readings_from_a_storm_that_raises_no_alert_send_no_sms);
   RUN_TEST(test_a_reading_that_carries_an_alert_level_is_not_an_alert);
+  RUN_TEST(test_an_alert_transmitted_several_times_and_acknowledged_sends_each_recipient_one_sms);
+  RUN_TEST(test_with_the_first_transmission_of_an_alert_lost_its_sms_go_out_once_on_a_repeat);
+  RUN_TEST(test_what_the_siren_node_transmits_sends_no_sms);
   RUN_TEST(test_on_the_prototype_site_evacuate_reaches_every_committed_recipient);
   RUN_TEST(test_the_committed_recipient_list_holds_only_fake_numbers);
   return UNITY_END();
