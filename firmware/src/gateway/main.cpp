@@ -31,7 +31,8 @@ class UnsetWallClock : public wadiwatch::WallClock {
 };
 
 // Stands in for the uplink until its adapter is written: reports each message to the
-// serial port and takes it, as a backend that is always reachable would.
+// serial port and takes it, as a backend that is always reachable would. No command
+// ever comes down it.
 class SerialUplink : public wadiwatch::Uplink {
  public:
   bool publish(const char* message, size_t length) override {
@@ -40,6 +41,8 @@ class SerialUplink : public wadiwatch::Uplink {
     Serial.println();
     return true;
   }
+
+  size_t receive(char*, size_t) override { return 0; }
 };
 
 // Stands in for the flash that holds messages waiting for the uplink until its adapter
@@ -72,6 +75,7 @@ UnconnectedStorage storage;
 UnsetWallClock wallClock;
 SerialUplink uplink;
 MemorySlotStorage messageStorage;
+ArduinoRandom randomSource;
 // The committed recipient list holds fake numbers only.
 wadiwatch::Gateway gateway(wadiwatch::prototypeSite().gateway,
                            wadiwatch::prototypeSite().auth,
@@ -82,7 +86,8 @@ wadiwatch::Gateway gateway(wadiwatch::prototypeSite().gateway,
                            storage,
                            wallClock,
                            uplink,
-                           messageStorage);
+                           messageStorage,
+                           randomSource);
 
 }  // namespace
 

@@ -4,12 +4,20 @@
   "heartbeat_interval_s": 3600,
   "dry_mode_interval_s": 900,
   "alert_refresh_interval_s": 60,
+  "all_clear_quiet_s": 1800,
+  "all_clear_command_valid_s": 120,
   "gateway": {
     "id": 769,
     "name": "Gateway",
     "lat": 36.4500,
     "lon": 10.7372
   },
+  "wadis": [
+    {
+      "id": 1,
+      "name": "Oued Démo"
+    }
+  ],
   "nodes": [
     {
       "id": 257,
@@ -17,7 +25,9 @@
       "name": "Wadi node 1 (upstream)",
       "lat": 36.4720,
       "lon": 10.7150,
-      "upstream": null
+      "upstream": null,
+      "wadi": 1,
+      "watch_level_cm": 60.0
     },
     {
       "id": 258,
@@ -25,7 +35,9 @@
       "name": "Wadi node 2 (downstream)",
       "lat": 36.4608,
       "lon": 10.7228,
-      "upstream": 257
+      "upstream": 257,
+      "wadi": 1,
+      "watch_level_cm": 60.0
     },
     {
       "id": 513,

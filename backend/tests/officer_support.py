@@ -43,6 +43,10 @@ def acknowledgement_url(alert_id):
     return f"/api/alerts/{alert_id}/acknowledgement"
 
 
+def all_clear_url(wadi_id):
+    return f"/api/wadis/{wadi_id}/all-clear"
+
+
 class Browser:
     """One person's browser. It keeps its cookies when the backend restarts."""
 
@@ -90,6 +94,15 @@ class Browser:
         if headers is None:
             headers = self._csrf_headers()
         return self.client.post(acknowledgement_url(alert_id), headers=headers)
+
+    def issue_all_clear(self, wadi_id, headers=None):
+        """Ask for the all clear for a wadi, as the dashboard's All clear button does."""
+        if headers is None:
+            headers = self._csrf_headers()
+        return self.client.post(all_clear_url(wadi_id), headers=headers)
+
+    def all_clears(self):
+        return [entry for entry in self.alert_log() if entry["type"] == "all_clear"]
 
     def _csrf_headers(self):
         return {CSRF_HEADER: self.csrf_token} if self.csrf_token else {}

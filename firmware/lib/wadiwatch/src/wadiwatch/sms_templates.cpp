@@ -12,6 +12,8 @@ namespace {
 // Each alert level has a name and a text. In a text, {level} stands for the
 // name of the alert level and {wadi} for the name of the wadi (which comes
 // from the site configuration). Every text must name both and say what to do.
+// The all clear has a name and a text in the same way: the closing SMS, sent at
+// the all clear to everyone who received an alert for the event.
 //
 // Length: one SMS carries 160 characters when all of them are in the basic GSM
 // alphabet, otherwise 70; a longer text has to be sent in several parts.
@@ -32,6 +34,7 @@ struct Wording {
   LevelWording watch;
   LevelWording warning;
   LevelWording evacuate;
+  LevelWording allClear;
 };
 
 const Wording kArabic = {
@@ -46,6 +49,10 @@ const Wording kArabic = {
     /* evacuate */ {
         "إخلاء",
         "{level} - {wadi}: الوادي يفيض. غادروا فورا واصعدوا إلى مكان مرتفع.",
+    },
+    /* allClear */ {
+        "نهاية الإنذار",
+        "{level} - {wadi}: انتهى الخطر. يمكنكم العودة بحذر.",
     },
 };
 
@@ -64,6 +71,11 @@ const Wording kFrench = {
         "ÉVACUATION",
         "{level} - {wadi} : crue en cours. Quittez tout de suite les abords de l'oued et montez "
         "sur un point haut.",
+    },
+    /* allClear */ {
+        "FIN D'ALERTE",
+        "{level} - {wadi} : le niveau de l'oued est redescendu. Vous pouvez revenir. Restez "
+        "prudents au bord de l'oued.",
     },
 };
 
@@ -145,17 +157,15 @@ const char* alertLevelName(Language language, AlertLevel alertLevel) {
   return wording != nullptr ? wording->name : "";
 }
 
-size_t renderAlertSms(Language language, AlertLevel alertLevel, const char* wadiName, char* buffer,
-                      size_t capacity) {
-  if (capacity == 0) return 0;
-  TextWriter writer(buffer, capacity);
-  const LevelWording* wording = wordingFor(language, alertLevel);
-  if (wording == nullptr) return writer.finish();
+namespace {
 
-  const char* text = wording->text;
+// Writes a wording's text with its placeholders filled in.
+size_t render(const LevelWording& wording, const char* wadiName, char* buffer, size_t capacity) {
+  TextWriter writer(buffer, capacity);
+  const char* text = wording.text;
   while (*text != '\0') {
     if (startsWith(text, kLevelPlaceholder)) {
-      writer.append(wording->name);
+      writer.append(wording.name);
       text += std::strlen(kLevelPlaceholder);
     } else if (startsWith(text, kWadiPlaceholder)) {
       writer.append(wadiName);
@@ -166,6 +176,23 @@ size_t renderAlertSms(Language language, AlertLevel alertLevel, const char* wadi
     }
   }
   return writer.finish();
+}
+
+}  // namespace
+
+size_t renderAlertSms(Language language, AlertLevel alertLevel, const char* wadiName, char* buffer,
+                      size_t capacity) {
+  if (capacity == 0) return 0;
+  const LevelWording* wording = wordingFor(language, alertLevel);
+  if (wording == nullptr) return TextWriter(buffer, capacity).finish();
+  return render(*wording, wadiName, buffer, capacity);
+}
+
+const char* allClearName(Language language) { return wordingIn(language).allClear.name; }
+
+size_t renderAllClearSms(Language language, const char* wadiName, char* buffer, size_t capacity) {
+  if (capacity == 0) return 0;
+  return render(wordingIn(language).allClear, wadiName, buffer, capacity);
 }
 
 }  // namespace wadiwatch

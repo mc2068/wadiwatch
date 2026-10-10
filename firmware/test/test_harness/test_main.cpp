@@ -1,6 +1,7 @@
 // Tests of the test harness itself: the in-memory radio, the fake clock and the
-// scripted gateway.
+// backend's side of the gateway's uplink.
 #include <chrono>
+#include <string>
 
 #include <unity.h>
 
@@ -9,9 +10,9 @@
 using wadiwatch::testing::Air;
 using wadiwatch::testing::FakeClock;
 using wadiwatch::testing::FakeSleepControl;
+using wadiwatch::testing::FakeUplink;
 using wadiwatch::testing::Frame;
 using wadiwatch::testing::InMemoryRadio;
-using wadiwatch::testing::ScriptedGateway;
 using wadiwatch::testing::TestSite;
 
 void setUp() {}
@@ -145,35 +146,83 @@ static void test_a_simulated_day_runs_in_under_a_second() {
   TEST_ASSERT_EQUAL_UINT64(24ull * 60 * 60 * 1000, site.clock.nowMs());
 }
 
-static bool isNodeOfTheSite(const wadiwatch::SiteAuth& auth, wadiwatch::NodeId node) {
-  for (size_t i = 0; i < auth.nodeCount; ++i) {
-    if (auth.nodes[i] == node) return true;
-  }
-  return false;
+static void test_radio_drops_the_requested_number_of_frames_of_one_sender_only() {
+  Air air;
+  InMemoryRadio& a = air.join();
+  InMemoryRadio& b = air.join();
+  InMemoryRadio& listener = air.join();
+  const Frame fromA = {1};
+  const Frame fromB = {2};
+
+  air.dropNextFrom(a, 2);
+  a.send(fromA.data(), fromA.size());
+  b.send(fromB.data(), fromB.size());
+  a.send(fromA.data(), fromA.size());
+  a.send(fromA.data(), fromA.size());
+
+  TEST_ASSERT_TRUE(receiveFrame(listener) == fromB);
+  TEST_ASSERT_TRUE(receiveFrame(listener) == fromA);
+  TEST_ASSERT_TRUE(receiveFrame(listener).empty());
+  TEST_ASSERT_EQUAL_UINT(4, air.transmitted().size());
 }
 
-// The scripted gateway sends the all clear that the gateway core cannot send yet.
-// It stands beside the site's gateway, not in its place: were it to borrow that
-// identifier, its packet counter would run against the core's own.
-static void test_the_scripted_gateway_is_a_node_of_its_own_beside_the_site_s_gateway() {
-  ScriptedGateway scripted;
-  TestSite site(scripted.config);
+static std::string receiveCommand(FakeUplink& uplink) {
+  char buffer[128];
+  const size_t length = uplink.receive(buffer, sizeof(buffer));
+  return std::string(buffer, length);
+}
 
-  TEST_ASSERT_TRUE(scripted.id != site.config.gateway.id);
-  TEST_ASSERT_TRUE(scripted.id != site.config.wadiNode.id);
-  TEST_ASSERT_TRUE(scripted.id != site.config.sirenNode.id);
-  TEST_ASSERT_TRUE(isNodeOfTheSite(site.config.auth, scripted.id));
-  TEST_ASSERT_TRUE(isNodeOfTheSite(site.config.auth, site.config.gateway.id));
-  TEST_ASSERT_FALSE(isNodeOfTheSite(site.config.auth, site.nodeIdOutsideSite()));
+static void test_the_uplink_hands_over_the_commands_delivered_to_it_in_order() {
+  FakeUplink uplink;
+  TEST_ASSERT_TRUE(receiveCommand(uplink).empty());
 
-  // Its all clear carries its own identifier and is accepted by a listener of the site.
-  wadiwatch::testing::FakeStorage listenerStorage;
-  wadiwatch::PacketCodec listener(site.config.auth, site.nodeIdOutsideSite(), listenerStorage);
-  const Frame allClear = scripted.allClear(site.config.wadiNode.id);
-  wadiwatch::Packet packet;
-  TEST_ASSERT_TRUE(listener.decode(allClear.data(), allClear.size(), packet));
-  TEST_ASSERT_EQUAL_UINT16(scripted.id, packet.sender);
-  TEST_ASSERT_EQUAL_UINT16(site.config.wadiNode.id, packet.allClear.wadiNode);
+  uplink.deliver("first");
+  uplink.deliver("second");
+
+  TEST_ASSERT_EQUAL_STRING("first", receiveCommand(uplink).c_str());
+  TEST_ASSERT_EQUAL_STRING("second", receiveCommand(uplink).c_str());
+  TEST_ASSERT_TRUE(receiveCommand(uplink).empty());
+}
+
+static void test_a_command_delivered_during_an_uplink_outage_comes_when_the_outage_ends() {
+  FakeUplink uplink;
+  uplink.startOutage();
+  uplink.deliver("held at the broker");
+
+  TEST_ASSERT_TRUE(receiveCommand(uplink).empty());
+
+  uplink.endOutage();
+  TEST_ASSERT_EQUAL_STRING("held at the broker", receiveCommand(uplink).c_str());
+}
+
+static void test_a_command_too_long_for_the_buffer_is_dropped() {
+  FakeUplink uplink;
+  uplink.deliver(std::string(200, 'x'));
+  uplink.deliver("next");
+
+  TEST_ASSERT_TRUE(receiveCommand(uplink).empty());
+  TEST_ASSERT_EQUAL_STRING("next", receiveCommand(uplink).c_str());
+}
+
+// The command a scenario has the backend send is worded as the contract words it
+// and numbered like the backend's: one after the other, from one.
+static void test_the_site_issues_all_clear_commands_as_the_backend_does() {
+  TestSite site;
+  const wadiwatch::WadiId wadi = site.config.gateway.wadis[0].id;
+  site.unplugGateway();
+  site.runMinutes(1);
+  const std::string issuedAt = std::to_string(site.wallClock.unixSeconds());
+
+  TEST_ASSERT_EQUAL_UINT32(1, site.issueAllClear());
+  TEST_ASSERT_EQUAL_UINT32(2, site.issueAllClear(wadi));
+
+  TEST_ASSERT_EQUAL_STRING(
+      ("{\"v\":1,\"kind\":\"all_clear\",\"command\":1,\"ts\":" + issuedAt + ",\"wadi\":" +
+       std::to_string(wadi) + "}")
+          .c_str(),
+      receiveCommand(site.uplink).c_str());
+  TEST_ASSERT_EQUAL_STRING(TestSite::allClearCommand(2, site.wallClock.unixSeconds(), wadi).c_str(),
+                           receiveCommand(site.uplink).c_str());
 }
 
 int main(int, char**) {
@@ -186,6 +235,10 @@ int main(int, char**) {
   RUN_TEST(test_a_frame_wakes_a_sleeping_device_only_while_its_receiver_is_on);
   RUN_TEST(test_each_radio_lists_the_frames_it_sent);
   RUN_TEST(test_a_simulated_day_runs_in_under_a_second);
-  RUN_TEST(test_the_scripted_gateway_is_a_node_of_its_own_beside_the_site_s_gateway);
+  RUN_TEST(test_radio_drops_the_requested_number_of_frames_of_one_sender_only);
+  RUN_TEST(test_the_uplink_hands_over_the_commands_delivered_to_it_in_order);
+  RUN_TEST(test_a_command_delivered_during_an_uplink_outage_comes_when_the_outage_ends);
+  RUN_TEST(test_a_command_too_long_for_the_buffer_is_dropped);
+  RUN_TEST(test_the_site_issues_all_clear_commands_as_the_backend_does);
   return UNITY_END();
 }

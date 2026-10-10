@@ -39,8 +39,14 @@ class UpstreamLink {
   void onPacket(const Packet& packet);
 
   // The last alert level heard from the upstream node; None when there is no upstream
-  // node or nothing has been heard from it.
+  // node, nothing has been heard from it, or its event has ended since.
   AlertLevel alertLevel() const { return alertLevel_; }
+
+  // The upstream node this link listens for, or kNoNode.
+  NodeId node() const { return config_.node; }
+
+  // The event at the upstream node is over: what was heard from it no longer holds.
+  void forget() { alertLevel_ = AlertLevel::None; }
 
  private:
   UpstreamConfig config_;

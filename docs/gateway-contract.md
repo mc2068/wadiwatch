@@ -1,15 +1,22 @@
-# Gateway-to-backend message contract
+# Gateway and backend message contract
 
-Version 1. This is what the gateway sends up to the backend for every radio packet it accepts or transmits. The gateway firmware produces it; the backend ingest validates it.
+Version 1. Two directions over one connection:
 
-- Executable form: `backend/wadiwatch_backend/contract.py`.
-- What the gateway produces: `docs/gateway-contract/gateway-output.jsonl`, and `firmware/lib/wadiwatch/src/wadiwatch/uplink_message.cpp`, which writes it.
-- Further examples the backend must accept, written by hand: `docs/gateway-contract/valid.jsonl`.
-- Examples the backend must reject, with the reason: `docs/gateway-contract/invalid.jsonl`.
+- **Up**: what the gateway sends the backend for every radio packet it accepts or transmits. The gateway firmware produces it; the backend ingest validates it. Most of this document.
+- **Down**: the one command the backend sends the gateway, the all clear for a wadi. See "Commands" below.
 
-`gateway-output.jsonl` is the shared contract check. It holds the messages the gateway core hands to its uplink for a fixed set of radio packets covering every message kind and every node the gateway hears: one flood at both wadi nodes of the prototype site, with the refresh of an alert and the Evacuate the downstream wadi node raises on hearing the upstream one. The firmware tests (`firmware/test/test_gateway_contract`) produce those messages again and fail if the file differs by a byte. The backend tests ingest the file and fail if the backend refuses a line. So the gateway and the backend cannot drift apart without a test failing on one side, although the two suites never run together.
+Where each side is written down:
 
-Change this document, `contract.py`, the gateway's translation and the example files together. To rewrite `gateway-output.jsonl` after an intended change, run from `firmware/`:
+- Up, executable form: `backend/wadiwatch_backend/contract.py`.
+- Up, what the gateway produces: `docs/gateway-contract/gateway-output.jsonl`, and `firmware/lib/wadiwatch/src/wadiwatch/uplink_message.cpp`, which writes it.
+- Up, further examples the backend must accept, written by hand: `docs/gateway-contract/valid.jsonl`.
+- Up, examples the backend must reject, with the reason: `docs/gateway-contract/invalid.jsonl`.
+- Down, what the backend produces: `backend/wadiwatch_backend/downlink.py` and `docs/gateway-contract/backend-commands.jsonl`.
+- Down, what the gateway reads: `firmware/lib/wadiwatch/src/wadiwatch/downlink_command.cpp`.
+
+`gateway-output.jsonl` and `backend-commands.jsonl` are the shared contract check. The first holds the messages the gateway core hands to its uplink for a fixed scenario covering every message kind and every node the gateway hears: one flood at both wadi nodes of the prototype site, with the refresh of an alert, the Evacuate the downstream wadi node raises on hearing the upstream one, and the all clear, which the gateway relays on the command of the second file. The firmware tests (`firmware/test/test_gateway_contract`) feed the gateway core that command, produce the messages again and fail if the first file differs by a byte or the core refuses a line of the second. The backend tests ingest the first file and fail if the backend refuses a line, and fail if the backend does not produce the lines of the second byte for byte. So the gateway and the backend cannot drift apart in either direction without a test failing on one side, although the two suites never run together.
+
+Change this document, `contract.py`, `downlink.py`, the gateway's translation and reader, and the example files together. To rewrite `gateway-output.jsonl` after an intended change, run from `firmware/`:
 
 ```bash
 WADIWATCH_UPDATE_CONTRACT=1 pio test -e native -f test_gateway_contract
@@ -22,9 +29,10 @@ Then run the backend tests.
 | | |
 |---|---|
 | Protocol | MQTT 3.1.1, QoS 1 |
-| Topic | `wadiwatch/up` |
-| Payload | One message per publish: a single JSON object, UTF-8, at most 512 bytes |
-| Reserved | `wadiwatch/down` for backend-to-gateway commands (the all clear). Not defined yet. |
+| Topic, up | `wadiwatch/up` |
+| Payload, up | One message per publish: a single JSON object, UTF-8, at most 512 bytes |
+| Topic, down | `wadiwatch/down` |
+| Payload, down | One command per publish: a single JSON object, UTF-8, at most 256 bytes. Never retained. |
 
 One topic carries every message kind, so the broker keeps them in order.
 
@@ -81,11 +89,12 @@ Sent by a wadi node. Each transmission the gateway accepts is forwarded, includi
 | `alert_level` | string | `none`, `watch`, `warning` or `evacuate`, in lower case. |
 | `level_cm` | number, 0 to 10000, optional | The water level behind the alert, in centimetres. |
 | `rise_cm_min` | number, -1000 to 1000, optional | The rate of rise behind the alert, in centimetres per minute. |
+| `refresh` | boolean, optional | `false` for the alert that raises the node's alert level, `true` for an alert refresh: the alert a node at Warning or above sends again every minute to repeat the level it already announced. The node says which it is; the gateway needs the difference after an all clear (see "Commands"). |
 
-The gateway sends both optional fields with every alert.
+The gateway sends the three optional fields with every alert.
 
 ```json
-{"v":1,"kind":"alert","node":257,"counter":1042,"ts":1791590460,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1}
+{"v":1,"kind":"alert","node":257,"counter":1042,"ts":1791590460,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1,"refresh":false}
 ```
 
 ### `acknowledgement`: a siren node confirms an alert
@@ -124,14 +133,15 @@ The heartbeat packet has the same layout for every node, and the gateway does no
 
 ### `all_clear`: the gateway transmitted an all clear
 
-Sent by the gateway about its own packet, so `node` and `counter` are the gateway's. One message per wadi node cleared.
+Sent by the gateway about its own packet, so `node` and `counter` are the gateway's and `ts` is the time it first transmitted the packet. An all clear is issued for a wadi and the gateway transmits one packet for each wadi node on it, so there is one message per wadi node cleared. The gateway transmits a further packet for a wadi node that shows it has not heard (see "Commands"), and reports that one too: several `all_clear` messages can name the same wadi node and the same command.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `wadi_node` | integer | The wadi node whose alert is ended. |
+| `command` | integer, 1 to 4294967295, optional | The `command` number of the backend's command the gateway relayed. The all clear packet carries it, so the gateway always sends it; it is optional so that a message written by hand may leave it out. The backend uses it to find the officer who issued the all clear. |
 
 ```json
-{"v":1,"kind":"all_clear","node":769,"counter":5,"ts":1791594000,"wadi_node":257}
+{"v":1,"kind":"all_clear","node":769,"counter":5,"ts":1791594000,"wadi_node":257,"command":41}
 ```
 
 ### `test`: a siren node ran a local test
@@ -154,10 +164,40 @@ The radio packets (`firmware/lib/wadiwatch/src/wadiwatch/packet.h`) count in oth
 | `batteryMillivolts` | millivolts | `battery_mv`, and `low_battery` by the node's threshold | millivolts |
 | `signalStrengthDbm` | dBm | `rssi_dbm` | dBm |
 | `alertSender`, `alertCounter` | | `wadi_node`, `alert_counter` | |
+| `refresh` (alert) | | `refresh` | |
+| `wadiNode`, `command` (all clear) | | `wadi_node`, `command` | |
 | `discardedReadings`, `alertRefreshLost` | | `discards`, `refresh_lost` | |
 | `hasLastLevel` | | whether a heartbeat has `level_cm` | |
 
 The gateway forwards a packet whatever the role of its sender: whether a node may send a kind of message is for the backend to judge (rule 7 and the tables above).
+
+## Commands
+
+What the backend sends down to the gateway, on `wadiwatch/down`. There is one command: the all clear for a wadi, issued by a signed-in officer on the dashboard and accepted by the backend's rule (the level below the Watch threshold for 30 minutes at every wadi node of the wadi, on current data).
+
+| Field | Type | Meaning |
+|---|---|---|
+| `v` | integer | Contract version. Always `1`. |
+| `kind` | string | `all_clear`. |
+| `command` | integer, 1 to 4294967295 | The backend's number for this command. It comes back in every `all_clear` message the gateway sends for it. |
+| `ts` | integer, 1 to 4294967295 | Unix time in whole seconds, UTC, at which the backend issued the command. |
+| `wadi` | integer, 1 to 255 | The wadi, by its identifier in the firmware site configuration (`WadiConfig::id`) and the backend site file (`wadis[].id`). The all clear covers every wadi node on it. |
+
+```json
+{"v":1,"kind":"all_clear","command":41,"ts":1791593990,"wadi":1}
+```
+
+The backend writes the fields in this order with no white space. The gateway reads them in any order and is as strict as the backend is with messages: a command with a missing field, a field given twice, a field this table does not list, a value out of range or of the wrong type, another version or another kind is dropped whole.
+
+What the gateway does with a command:
+
+1. **Only a fresh one.** A command can wait at the broker while the gateway is offline and arrive when the wadi is in flood again. The gateway acts on a command only if `ts` is no more than `GatewayConfig::commandMaxAgeS` (120 s on the prototype site) before its own clock, and not that much after it. It does not act on any command while it does not know the time. The backend does its part: it never retains a command, and does not hand one to an MQTT client that has no connection.
+2. **Once.** The same `command` and `ts` delivered twice (QoS 1) is acted on once. A command for a wadi the gateway does not know is dropped.
+3. **The event ends.** Every recipient who received an alert SMS for the event gets one closing SMS, queued and retried like any SMS. An alert SMS still waiting is not sent any more. The next alert that raises an alert level starts a new event.
+4. **A signed all clear packet for each wadi node of the wadi**, carrying `command`, each transmitted several times like an alert, and reported up as an `all_clear` message from the gateway's store like every other message. A wadi node listens only for a short answer window after a packet of its own, so the gateway holds the packet for a wadi node until it next hears that node (within a minute for a node at Warning or above), and for `GatewayConfig::allClearHoldMs` at most. So an `all_clear` message can follow its command by up to a minute and a half.
+5. **Again for a wadi node that has not heard.** A wadi node that held an alert level and goes on sending an alert refresh has missed the all clear: the gateway answers it with a further all clear packet (and message) and starts no event for it, up to `GatewayConfig::allClearMaxAnswers` times within `GatewayConfig::allClearAnswerPeriodMs`. A wadi node that has heard says so at once with a `reading` whose `alert_level` is `none`. An alert that raises a node's alert level (`refresh` false) is never answered with an all clear: it is a new event.
+
+The gateway sends nothing back for a command it did not act on. The backend learns that the all clear happened from the `all_clear` messages, and that it did not from their absence: until they arrive it shows the alert as still in force, and after `all_clear_command_valid_s` (site file, the same 120 s) it lets the officer issue the command again.
 
 ## Held messages
 
@@ -188,12 +228,14 @@ Over MQTT a rejected message is logged and dropped.
 How stored messages become the alert level shown on the dashboard:
 
 - A wadi node's alert level is the `alert_level` of its latest `alert`, or `none` once an `all_clear` for that wadi node has arrived after it.
-- A siren node's alert level is the highest level among its latest `acknowledgement` per wadi node, leaving out wadi nodes that have had an `all_clear` since.
+- A siren node's alert level is the highest level among its latest `acknowledgement` per wadi node, leaving out wadi nodes that have had an `all_clear` since. What counts is when the alert it acknowledges arrived, if the acknowledgement names one the backend holds (`alert_counter`): a siren node's acknowledgement of the last alert refresh can arrive just behind the all clear that answered that refresh.
+- In the alert log an `all_clear` is one entry per wadi node, with the officer and time of the command whose number it carries. A further `all_clear` for the same wadi node and command, with no alert from that node in between, belongs to the same entry.
 - A `reading` never changes an alert level, not even through its own `alert_level` field. The decision belongs to the wadi node, and it states it in an `alert`.
 
 ## Not settled here
 
 - The radio packet layouts are owned by the firmware. If an acknowledgement packet cannot supply `alert_level`, or a heartbeat packet cannot supply a field required here, change this contract rather than inventing values in the gateway.
 - The gateway does not send a heartbeat of its own. If the dashboard needs to tell a silent gateway from a quiet wadi more quickly than the nodes' own traffic allows, add a gateway message kind.
-- The gateway does not send an all clear yet, so no `all_clear` message leaves it. The `all_clear` lines of `gateway-output.jsonl` (one for each of the two wadi nodes in alert) come from the gateway's translation, for the packets the gateway's own codec signs, without passing through the gateway's radio and uplink. Produce them through these once the gateway sends the all clear.
+- The gateway does not tell the backend that it refused or ignored a command. If the officer should see why an all clear did not happen (a stale command, a gateway without the time of day), add a gateway message kind for it.
+- An officer cannot issue an all clear for a wadi while one of its wadi nodes is silent or has never reported a level, so a wadi node destroyed by the flood blocks the all clear for its wadi until it is replaced. Whether an officer may override that, and how, is not decided.
 - The gateway does not tell the backend when it has given up messages from a full store. A gateway message kind could carry that count.

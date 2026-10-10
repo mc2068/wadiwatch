@@ -26,15 +26,6 @@ class StayAwake : public wadiwatch::SleepControl {
   void requestSleepMs(uint64_t) override {}
 };
 
-// Arduino's random(), which on the ESP32 draws from the hardware random number
-// generator as long as randomSeed() is never called.
-class ArduinoRandom : public wadiwatch::RandomSource {
- public:
-  uint32_t below(uint32_t bound) override {
-    return static_cast<uint32_t>(random(static_cast<long>(bound)));
-  }
-};
-
 EspClock espClock;
 StayAwake sleepControl;
 UnconnectedLevelSensor levelSensor;

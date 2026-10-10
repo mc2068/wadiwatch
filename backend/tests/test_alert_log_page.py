@@ -48,3 +48,41 @@ def test_the_script_does_not_keep_sign_in_secrets_in_browser_storage(harness):
     assert "localStorage" not in script
     assert "sessionStorage" not in script
     assert "document.cookie" not in script
+
+
+# The all clear
+
+
+def test_the_page_asks_before_an_all_clear_is_issued(harness):
+    page = harness.client.get("/").text
+
+    form = re.search(r'<form[^>]*id="all-clear-form".*?</form>', page, re.DOTALL).group(0)
+    # Cancel comes first and is not the button that submits.
+    assert form.index('id="all-clear-cancel"') < form.index('id="all-clear-submit"')
+    assert re.search(r'<button[^>]+id="all-clear-cancel"[^>]+type="button"', form)
+    assert re.search(r'<button[^>]+id="all-clear-submit"[^>]+type="submit"', form)
+    assert "closing SMS" in form
+
+
+def test_the_script_issues_the_all_clear_through_the_api_with_the_csrf_token(harness):
+    script = alert_log_script(harness)
+
+    assert "api/wadis" in script
+    assert "/all-clear" in script
+    issue = script[script.index("async function issueAllClear") :]
+    issue = issue[: issue.index("function allClearControl")]
+    assert 'method: "POST"' in issue
+    assert "CSRF_HEADER" in issue
+    # What the backend refuses, and why, is shown to the officer as the backend words it.
+    assert "409" in issue
+    assert ".error" in issue
+
+
+def test_the_script_shows_who_issued_an_all_clear_and_one_that_is_on_its_way(harness):
+    script = alert_log_script(harness)
+
+    assert "entry.issued" in script
+    assert "all_clear_sent" in script
+    # The control is the backend's to allow: the script never works the rule out itself.
+    assert "verdict.allowed" in script
+    assert "watch_level_cm" not in script

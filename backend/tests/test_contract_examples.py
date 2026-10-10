@@ -11,8 +11,9 @@ import json
 
 import pytest
 
-from conftest import gateway_output, valid_examples
+from conftest import backend_commands, gateway_output, valid_examples
 from wadiwatch_backend.contract import KINDS
+from wadiwatch_backend.downlink import all_clear_command, parse_command
 
 
 @pytest.mark.parametrize("raw", gateway_output())
@@ -42,10 +43,34 @@ def test_gateway_output_ingested_in_order_shows_through_the_api(harness, site):
         assert nodes[node_id]["level_cm"] == reading["level_cm"]
         assert nodes[node_id]["rise_cm_min"] == reading["rise_cm_min"]
         assert nodes[node_id]["level_ts"] == reading["ts"]
-    # The file ends with the all clear, so no alert is left in force.
-    assert messages[-1]["kind"] == "all_clear"
-    assert messages[-1]["wadi_node"] in wadi_node_ids
+    # The gateway relayed an all clear for every wadi node, each naming the command it
+    # came from, so no alert is left in force: not at a wadi node, and not at the siren
+    # node, whose acknowledgement of the last alert refresh arrives behind the all clear.
+    all_clears = [m for m in messages if m["kind"] == "all_clear"]
+    assert {m["wadi_node"] for m in all_clears} == wadi_node_ids
+    assert all(m["node"] == site.gateway.id and m["command"] >= 1 for m in all_clears)
     assert {node["alert_level"] for node in nodes.values()} == {"none"}
+
+
+# What the backend sends down: docs/gateway-contract/backend-commands.jsonl. The firmware
+# tests fail unless the gateway core reads every line of it, and take the command of
+# their contract scenario from it.
+
+
+@pytest.mark.parametrize("raw", backend_commands())
+def test_command_of_the_shared_examples_is_what_the_backend_sends_byte_for_byte(raw):
+    command = parse_command(raw)
+
+    assert all_clear_command(command["command"], command["ts"], command["wadi"]) == raw
+
+
+def test_the_shared_commands_are_the_ones_the_gateway_output_answers(site):
+    commands = [json.loads(raw) for raw in backend_commands()]
+    relayed = {m["command"] for m in map(json.loads, gateway_output()) if m["kind"] == "all_clear"}
+
+    assert commands
+    assert all(site.wadi(command["wadi"]) is not None for command in commands)
+    assert relayed == {command["command"] for command in commands}
 
 
 @pytest.mark.parametrize("raw", valid_examples())

@@ -191,6 +191,100 @@ static void test_the_text_is_terminated_and_its_length_returned() {
   }
 }
 
+// --- The closing SMS, sent at the all clear ---
+
+static std::string renderClosing(Language language, const char* wadiName) {
+  char text[kMaxSmsTextLength + 1];
+  const size_t length = wadiwatch::renderAllClearSms(language, wadiName, text, sizeof(text));
+  return std::string(text, length);
+}
+
+static void test_the_closing_text_names_the_wadi_and_says_that_the_alert_is_over() {
+  for (const Language language : kLanguages) {
+    const char* wadiName = wadiNameIn(prototypeWadi(), language);
+    const char* name = wadiwatch::allClearName(language);
+
+    const std::string text = renderClosing(language, wadiName);
+
+    TEST_ASSERT_TRUE(std::strlen(name) > 0);
+    TEST_ASSERT_TRUE(contains(text, wadiName));
+    TEST_ASSERT_TRUE(contains(text, name));
+    // More than the two names: what the recipient may do now.
+    TEST_ASSERT_TRUE(text.size() > std::strlen(wadiName) + std::strlen(name));
+    TEST_ASSERT_FALSE(contains(text, "{"));
+    TEST_ASSERT_FALSE(contains(text, "}"));
+    TEST_ASSERT_TRUE(isWellFormedUtf8(text));
+  }
+}
+
+static void test_the_closing_text_cannot_be_taken_for_an_alert() {
+  for (const Language language : kLanguages) {
+    const char* wadiName = wadiNameIn(prototypeWadi(), language);
+    const std::string closing = renderClosing(language, wadiName);
+    for (const AlertLevel alertLevel : kAlertLevels) {
+      // It opens with a name of its own, which is that of no alert level.
+      TEST_ASSERT_TRUE(std::strcmp(wadiwatch::allClearName(language),
+                                   alertLevelName(language, alertLevel)) != 0);
+      TEST_ASSERT_TRUE(closing != render(language, alertLevel, wadiName));
+    }
+  }
+}
+
+static void test_the_closing_text_is_in_the_script_of_its_language() {
+  TEST_ASSERT_TRUE(hasArabicScript(renderClosing(Language::Arabic, "W")));
+  TEST_ASSERT_TRUE(hasArabicScript(wadiwatch::allClearName(Language::Arabic)));
+  TEST_ASSERT_FALSE(hasArabicScript(renderClosing(Language::French, "W")));
+  TEST_ASSERT_FALSE(hasArabicScript(wadiwatch::allClearName(Language::French)));
+}
+
+// How many characters a text has: the bytes that do not continue a character.
+static size_t characterCount(const std::string& text) {
+  size_t count = 0;
+  for (const char c : text) {
+    if ((static_cast<uint8_t>(c) & 0xC0) != 0x80) ++count;
+  }
+  return count;
+}
+
+static void test_the_closing_text_fits_one_sms_with_the_wadi_names_of_the_prototype_site() {
+  // One SMS carries 70 characters in Arabic, 160 in French written with the basic
+  // GSM letters only.
+  const size_t kArabicSmsCharacters = 70;
+  const size_t kFrenchSmsCharacters = 160;
+  const wadiwatch::GatewayConfig& gateway = wadiwatch::prototypeSite().gateway;
+  for (size_t w = 0; w < gateway.wadiCount; ++w) {
+    const std::string arabic =
+        renderClosing(Language::Arabic, wadiNameIn(gateway.wadis[w], Language::Arabic));
+    const std::string french =
+        renderClosing(Language::French, wadiNameIn(gateway.wadis[w], Language::French));
+    TEST_ASSERT_TRUE(characterCount(arabic) <= kArabicSmsCharacters);
+    TEST_ASSERT_TRUE(characterCount(french) <= kFrenchSmsCharacters);
+    TEST_ASSERT_TRUE(arabic.size() <= kMaxSmsTextLength);
+    TEST_ASSERT_TRUE(french.size() <= kMaxSmsTextLength);
+  }
+}
+
+static void test_a_closing_text_too_long_for_the_buffer_is_cut_between_characters() {
+  for (const Language language : kLanguages) {
+    const char* wadiName = wadiNameIn(prototypeWadi(), language);
+    const std::string whole = renderClosing(language, wadiName);
+
+    for (size_t capacity = 1; capacity <= whole.size(); ++capacity) {
+      char guarded[kMaxSmsTextLength + 2];
+      std::memset(guarded, '#', sizeof(guarded));
+
+      const size_t length = wadiwatch::renderAllClearSms(language, wadiName, guarded, capacity);
+
+      TEST_ASSERT_TRUE(length < capacity);
+      TEST_ASSERT_EQUAL_CHAR('\0', guarded[length]);
+      TEST_ASSERT_EQUAL_CHAR('#', guarded[capacity]);
+      const std::string cut(guarded);
+      TEST_ASSERT_TRUE(isWellFormedUtf8(cut));
+      TEST_ASSERT_TRUE(whole.compare(0, cut.size(), cut) == 0);
+    }
+  }
+}
+
 static void test_no_alert_has_no_text() {
   for (const Language language : kLanguages) {
     char text[kMaxSmsTextLength + 1] = "untouched";
@@ -211,6 +305,11 @@ int main(int, char**) {
   RUN_TEST(test_every_template_fits_an_sms_with_the_wadi_names_of_the_prototype_site);
   RUN_TEST(test_a_text_too_long_for_the_buffer_is_cut_between_characters);
   RUN_TEST(test_the_text_is_terminated_and_its_length_returned);
+  RUN_TEST(test_the_closing_text_names_the_wadi_and_says_that_the_alert_is_over);
+  RUN_TEST(test_the_closing_text_cannot_be_taken_for_an_alert);
+  RUN_TEST(test_the_closing_text_is_in_the_script_of_its_language);
+  RUN_TEST(test_the_closing_text_fits_one_sms_with_the_wadi_names_of_the_prototype_site);
+  RUN_TEST(test_a_closing_text_too_long_for_the_buffer_is_cut_between_characters);
   RUN_TEST(test_no_alert_has_no_text);
   return UNITY_END();
 }

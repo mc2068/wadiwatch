@@ -145,11 +145,8 @@ class WallClock {
   virtual bool nowUnixSeconds(uint32_t& unixSeconds) = 0;
 };
 
-// The gateway's connection to the backend (MQTT, see docs/gateway-contract.md).
-// Only the way up exists so far. The way down (commands from the backend, such as
-// the all clear) uses the same connection and belongs on this port too: add it as
-// a method that hands over the next command received, the way Radio::receive
-// hands over frames.
+// The gateway's connection to the backend (MQTT, see docs/gateway-contract.md). One
+// connection serves both ways: messages go up, commands come down.
 class Uplink {
  public:
   virtual ~Uplink() = default;
@@ -158,6 +155,12 @@ class Uplink {
   // Returns false when the uplink is offline or the message was not confirmed;
   // the message may still have arrived, and the caller sends it again unchanged.
   virtual bool publish(const char* message, size_t length) = 0;
+  // Copies the next command received from the backend into buffer, as it came
+  // (UTF-8 JSON, no zero byte at the end), and returns its length, or 0 when
+  // nothing is waiting. A command longer than the buffer is dropped. The adapter
+  // only hands commands over: whether one is well formed, and whether it is still
+  // worth acting on after waiting at the broker, is the core's business.
+  virtual size_t receive(char* buffer, size_t capacity) = 0;
 };
 
 // Every slot of a SlotStorage holds this many bytes.

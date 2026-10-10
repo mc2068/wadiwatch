@@ -4,9 +4,10 @@ import logging
 import time
 from dataclasses import dataclass
 
-from . import health
+from . import all_clear, health
 from .alert_log import ALERT, KINDS as ALERT_LOG_KINDS, build_alert_log
 from .contract import ALERT_LEVELS, WADI_NODE, ContractError, parse_message
+from .downlink import all_clear_command
 from .officers import Officers
 from .store import MessageStore
 
@@ -38,11 +39,34 @@ class UnknownAlert(LookupError):
     """No alert entry of the alert log has this id."""
 
 
+class UnknownWadi(LookupError):
+    """The site has no wadi with this identifier."""
+
+
+class AllClearRefused(Exception):
+    """The data does not bear out an all clear. `verdict` says why (all_clear.judge)."""
+
+    def __init__(self, verdict):
+        super().__init__(verdict["refusal"])
+        self.verdict = verdict
+
+
+class GatewayUnreachable(Exception):
+    """The all clear command could not be handed over on the way to the gateway."""
+
+
 class Backend:
-    def __init__(self, db_path, site, clock=time.time):
+    def __init__(self, db_path, site, clock=time.time, downlink=None):
+        """`downlink`, if given, sends one command towards the gateway.
+
+        It is called with the command as text and returns True once the command
+        has been handed over (to the MQTT broker in production). Without one,
+        or when it returns False, no all clear can be issued.
+        """
         self.site = site
         self._store = MessageStore(db_path)
         self._clock = clock
+        self.downlink = downlink
         # Accounts, sessions and officer acknowledgements (ticket #13).
         self.officers = Officers(db_path, clock)
 
@@ -66,6 +90,12 @@ class Backend:
             return IngestResult(STORED)
         return IngestResult(DUPLICATE)
 
+    def latest_counter(self, node_id):
+        """The counter of the last message stored from a unit, or 0 if there is none."""
+        with self._store.reader() as reader:
+            message = reader.latest_from(node_id)
+        return message["counter"] if message else 0
+
     # Alert log and officer acknowledgement (ticket #13). The rules are in alert_log.py.
 
     def alert_log(self, show_officers=False):
@@ -75,8 +105,15 @@ class Backend:
         """
         with self._store.reader() as reader:
             messages = reader.in_arrival_order(ALERT_LOG_KINDS)
+            commands = reader.commands()
+            relayed = reader.commands_relayed()
         return build_alert_log(
-            messages, self.site, self.officers.acknowledgements(), show_officers
+            messages,
+            self.site,
+            self.officers.acknowledgements(),
+            show_officers,
+            commands={command["command"]: command for command in commands},
+            waiting=self._commands_waiting(commands, relayed),
         )
 
     def acknowledge_alert(self, alert_id, officer):
@@ -90,6 +127,69 @@ class Backend:
         ):
             raise UnknownAlert(alert_id)
         return self.officers.acknowledge(alert_id, officer)
+
+    # The all clear (ticket #14). The rule is in all_clear.py, the command in downlink.py.
+
+    def all_clear_verdicts(self):
+        """For every wadi: whether an all clear would be accepted now and, if not, why."""
+        now = self._clock()
+        with self._store.reader() as reader:
+            verdicts = [self._judge(reader, wadi, now) for wadi in self.site.wadis]
+        return {"now": int(now), "wadis": verdicts}
+
+    def issue_all_clear(self, wadi_id, officer):
+        """Send the gateway the all clear for a wadi, on the decision of `officer`.
+
+        Returns the command: {"command", "wadi", "officer", "ts"}. Raises
+        UnknownWadi, AllClearRefused when the rule is not met, GatewayUnreachable
+        when the command could not be sent. The all clear itself is in force
+        only once the gateway has transmitted it and its `all_clear` messages
+        have come back: that is what the alert log records.
+
+        A command issued for the same wadi a moment ago and not yet reported
+        back by the gateway stands: it is returned, and no second one is sent.
+        """
+        wadi = self.site.wadi(wadi_id)
+        if wadi is None:
+            raise UnknownWadi(wadi_id)
+        now = self._clock()
+        with self._store.reader() as reader:
+            waiting = self._commands_waiting(reader.commands(), reader.commands_relayed())
+            verdict = self._judge(reader, wadi, now)
+        if wadi.id in waiting:
+            return waiting[wadi.id]
+        if not verdict["allowed"]:
+            raise AllClearRefused(verdict)
+        if self.downlink is None:
+            raise GatewayUnreachable("the backend has no connection to the gateway")
+
+        command = self._store.add_command(wadi.id, officer, now)
+        if not self.downlink(all_clear_command(command, int(now), wadi.id)):
+            # The row stays, marked as not sent: this number is not used again.
+            raise GatewayUnreachable("the command could not be sent to the gateway")
+        self._store.mark_command_sent(command)
+        log.info("all clear command %d for wadi %d sent by %s", command, wadi.id, officer)
+        return {"command": command, "wadi": wadi.id, "officer": officer, "ts": int(now)}
+
+    def _judge(self, reader, wadi, now):
+        alert_levels = {
+            node.id: self._wadi_node_alert(reader, node)[0] for node in self.site.wadi_nodes
+        }
+        report = health.describe(reader, self.site, now, list(alert_levels.values()))
+        return all_clear.judge(reader, self.site, wadi, now, report["gateway"], alert_levels)
+
+    def _commands_waiting(self, commands, relayed):
+        """Wadi id -> the command sent for it that the gateway has not reported back yet.
+
+        A command counts for as long as the gateway would still act on it.
+        """
+        now = self._clock()
+        waiting = {}
+        for command in commands:
+            fresh = now - command["ts"] < self.site.all_clear_command_valid_s
+            if fresh and command["command"] not in relayed:
+                waiting[command["wadi"]] = command
+        return waiting
 
     def nodes(self):
         """Every configured node with its latest level and current alert level."""
@@ -188,7 +288,16 @@ class Backend:
         in_force = []
         for wadi_node in self.site.wadi_nodes:
             acknowledgement = reader.latest_acknowledgement(node.id, wadi_node.id)
-            if acknowledgement and acknowledgement["id"] > _in_force_after(reader, wadi_node.id):
+            if acknowledgement is None:
+                continue
+            # What counts is when the alert it answers arrived, if the gateway
+            # forwarded that alert: a siren node's acknowledgement of the last
+            # refresh can reach the backend just behind the all clear.
+            answered = None
+            if "alert_counter" in acknowledgement:
+                answered = reader.alert_with_counter(wadi_node.id, acknowledgement["alert_counter"])
+            arrived = min(acknowledgement["id"], answered["id"]) if answered else acknowledgement["id"]
+            if arrived > _in_force_after(reader, wadi_node.id):
                 in_force.append(acknowledgement)
         if not in_force:
             return "none", None

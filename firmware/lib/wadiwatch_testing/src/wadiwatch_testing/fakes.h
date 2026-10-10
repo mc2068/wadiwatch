@@ -310,6 +310,12 @@ class Air {
   // The next `count` transmissions are lost before reaching any receiver.
   void dropNext(size_t count) { framesToDrop_ += count; }
 
+  // The next `count` transmissions of one radio are lost before reaching any
+  // receiver, whatever the other radios send meanwhile.
+  void dropNextFrom(const InMemoryRadio& sender, size_t count) {
+    framesToDropFrom_[&sender] += count;
+  }
+
   // Delivers a frame to every listening radio, as if sent by a transmitter outside the site.
   void inject(const Frame& frame) { deliver(frame, nullptr); }
 
@@ -323,6 +329,11 @@ class Air {
     transmitted_.push_back(frame);
     if (framesToDrop_ > 0) {
       --framesToDrop_;
+      return;
+    }
+    const auto dropping = framesToDropFrom_.find(sender);
+    if (dropping != framesToDropFrom_.end() && dropping->second > 0) {
+      --dropping->second;
       return;
     }
     deliver(frame, sender);
@@ -339,6 +350,7 @@ class Air {
   std::vector<std::unique_ptr<InMemoryRadio>> radios_;
   std::vector<Frame> transmitted_;
   size_t framesToDrop_ = 0;
+  std::map<const InMemoryRadio*, size_t> framesToDropFrom_;
 };
 
 inline void InMemoryRadio::send(const uint8_t* data, size_t length) {
@@ -421,7 +433,8 @@ class FakeWallClock : public WallClock {
   bool known_ = true;
 };
 
-// The backend as the gateway's uplink sees it. Records every message it took, in order.
+// The backend as the gateway's uplink sees it. Records every message it took, in
+// order, and hands the gateway the commands a scenario has the backend send.
 class FakeUplink : public Uplink {
  public:
   bool publish(const char* message, size_t length) override {
@@ -431,7 +444,21 @@ class FakeUplink : public Uplink {
     return true;
   }
 
-  // During an outage the uplink is offline and takes nothing.
+  size_t receive(char* buffer, size_t capacity) override {
+    // A command sent during an outage waits at the broker and comes when the
+    // connection is back.
+    if (outage_ || commands_.empty()) return 0;
+    const std::string command = commands_.front();
+    commands_.pop_front();
+    if (command.size() > capacity) return 0;
+    std::memcpy(buffer, command.data(), command.size());
+    return command.size();
+  }
+
+  // The backend sends this command down: the text exactly as it would publish it.
+  void deliver(const std::string& command) { commands_.push_back(command); }
+
+  // During an outage the uplink is offline: it takes nothing and delivers nothing.
   void startOutage() { outage_ = true; }
   void endOutage() { outage_ = false; }
 
@@ -444,6 +471,7 @@ class FakeUplink : public Uplink {
   bool outage_ = false;
   size_t attempts_ = 0;
   std::vector<std::string> published_;
+  std::deque<std::string> commands_;
 };
 
 // Stands for the gateway's flash: slots that outlive the core they are given to.

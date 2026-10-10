@@ -105,10 +105,12 @@ KINDS = {
     "alert": Kind(
         senders=(WADI_NODE,),
         required={"alert_level": _one_of(ALERT_LEVELS)},
-        # The measurement behind the alert. The gateway sends both.
+        # The measurement behind the alert, and whether the alert repeats a level
+        # the node already announced. The gateway sends all three.
         optional={
             "level_cm": _level_cm,
             "rise_cm_min": _rise_cm_min,
+            "refresh": _boolean,
         },
     ),
     "acknowledgement": Kind(
@@ -136,6 +138,9 @@ KINDS = {
     "all_clear": Kind(
         senders=(GATEWAY,),
         required={"wadi_node": _node_id},
+        # The backend's number for the command the gateway relayed (downlink.py).
+        # The gateway always sends it; a message written by hand may leave it out.
+        optional={"command": _integer(1, MAX_UINT32)},
     ),
     "test": Kind(senders=(SIREN_NODE,)),
 }

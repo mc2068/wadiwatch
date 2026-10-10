@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from wadiwatch_backend.replay import DEFAULT_SCENARIO, load_scenario, replay
+from wadiwatch_backend.replay import DEFAULT_SCENARIO, left_open, load_scenario, replay
 
 
 @pytest.fixture
@@ -56,6 +56,24 @@ def test_flood_scenario_uses_every_message_kind_and_only_configured_nodes(scenar
     }
     configured = {node.id for node in site.nodes} | {site.gateway.id}
     assert {message["node"] for message in scenario} <= configured
+
+
+def test_a_scenario_left_open_ends_with_its_alerts_in_force_for_an_officer_to_end(
+    harness, signed_in, scenario, clock, wadi, upstream, downstream
+):
+    send = Recorder(harness)
+
+    summary = replay(left_open(scenario), send, instant=True, clock=clock)
+
+    assert summary.rejected == 0
+    assert summary.stored == len(scenario) - 2
+    assert "all_clear" not in {message["kind"] for message in send.sent}
+    assert send.levels_shown[upstream.id][-1] == "warning"
+    assert send.levels_shown[downstream.id][-1] == "evacuate"
+    # The flood of the scenario has passed, so the all clear is there to be issued.
+    response = signed_in.issue_all_clear(wadi.id)
+    assert response.status_code == 200, response.text
+    assert harness.gateway.commands[0]["wadi"] == wadi.id
 
 
 def test_instant_replay_ends_now_and_keeps_the_recorded_spacing(harness, scenario, clock):

@@ -1,9 +1,19 @@
 // ESP32 implementations of the ports shared by every device.
 #pragma once
 
+#include <Arduino.h>
 #include <esp_timer.h>
 
 #include "wadiwatch/ports.h"
+
+// Arduino's random(), which on the ESP32 draws from the hardware random number
+// generator as long as randomSeed() is never called.
+class ArduinoRandom : public wadiwatch::RandomSource {
+ public:
+  uint32_t below(uint32_t bound) override {
+    return static_cast<uint32_t>(random(static_cast<long>(bound)));
+  }
+};
 
 class EspClock : public wadiwatch::Clock {
  public:

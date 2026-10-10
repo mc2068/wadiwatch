@@ -37,6 +37,11 @@ struct WadiNodeConfig {
   // While at Warning or above, the node sends its alert again this long after it last
   // sent it. Must be longer than an alert takes to go out all its times.
   uint32_t alertResendIntervalMs;
+  // The answer window: while the node holds an alert level, or remembers one heard
+  // from its upstream node, its receiver stays on for this long after each packet
+  // it transmits. That is when the gateway answers with the all clear. Must be
+  // longer than the gateway takes to hear a packet and transmit its answer.
+  uint32_t allClearWindowMs;
 };
 
 struct SirenNodeConfig {
@@ -95,6 +100,25 @@ struct GatewayConfig {
   // After the uplink fails to take a message, the gateway waits this long before
   // it offers the message again.
   uint32_t uplinkRetryIntervalMs;
+  // How each all clear packet is repeated on the air, as a wadi node repeats an alert.
+  AlertRepeatConfig allClearRepeat;
+  // A wadi node hears the all clear only in the answer window after a packet of its
+  // own. The gateway holds the all clear for a wadi node until it next hears that
+  // node, and for this long at most: then it transmits anyway, for the siren nodes.
+  // Must be longer than the wadi nodes' alert re-send interval, so that a node at
+  // Warning or above is heard first.
+  uint32_t allClearHoldMs;
+  // A wadi node that held an alert level when the all clear was issued is given the
+  // all clear again whenever it shows it has not heard, for this long after the
+  // command. After that its alert counts as a new event. Must be longer than the
+  // heartbeat interval: a node at Watch in dry mode sends nothing else.
+  uint32_t allClearAnswerPeriodMs;
+  // And this many times at most for one command.
+  uint8_t allClearMaxAnswers;
+  // A command from the backend is acted on only if it was issued no longer ago than
+  // this by the gateway's wall clock, and not in the future by more: a command the
+  // broker kept through an outage must not end a later event.
+  uint32_t commandMaxAgeS;
 };
 
 struct SiteConfig {

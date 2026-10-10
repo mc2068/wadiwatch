@@ -114,6 +114,13 @@ static void test_alert_round_trips() {
   TEST_ASSERT_TRUE(received.alert.alertLevel == AlertLevel::Evacuate);
   TEST_ASSERT_EQUAL_UINT16(2250, received.alert.levelMm);
   TEST_ASSERT_EQUAL_INT16(50, received.alert.rateOfRiseMmPerMin);
+  TEST_ASSERT_FALSE(received.alert.refresh);
+
+  // The same alert sent again a minute later says that it is a refresh.
+  sent.alert.refresh = true;
+  const Packet refresh = sendAcross(link, sent);
+  TEST_ASSERT_TRUE(refresh.alert.refresh);
+  TEST_ASSERT_TRUE(refresh.alert.alertLevel == AlertLevel::Evacuate);
 }
 
 static void test_acknowledgement_round_trips() {
@@ -174,10 +181,12 @@ static void test_all_clear_round_trips() {
   Packet sent = Packet();
   sent.kind = PacketKind::AllClear;
   sent.allClear.wadiNode = link.otherSenderId;
+  sent.allClear.command = 0xFFFFFFFEu;
 
   const Packet received = sendAcross(link, sent);
 
   TEST_ASSERT_EQUAL_UINT16(link.otherSenderId, received.allClear.wadiNode);
+  TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFEu, received.allClear.command);
 }
 
 static void test_test_packet_round_trips() {

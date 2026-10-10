@@ -1,4 +1,4 @@
-/* Alert log, officer sign-in and the Evacuate acknowledgement request.
+/* Alert log, officer sign-in, the Evacuate acknowledgement request and the all clear.
    Colours and alert level variables come from dashboard.css. */
 
 /* Sign-in control in the top bar */
@@ -168,7 +168,23 @@
 .alert-log__button:hover { background: #1d3646; }
 .alert-log__button:disabled { opacity: 0.6; cursor: default; }
 
-/* Sign-in dialog */
+/* The all clear: beside the alert in force it would end */
+
+.all-clear {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  max-width: 46ch;
+}
+.all-clear__button { background: #1d6b33; border-color: #1d6b33; }
+.all-clear__button:hover { background: #17552a; }
+.all-clear__button:disabled { background: var(--silent); border-color: var(--silent); opacity: 1; }
+.all-clear__refusal { font-size: 12px; color: var(--ink-soft); }
+.all-clear__sent { font-weight: 600; }
+
+/* Sign-in dialog, and the question asked before an all clear */
 
 .sign-in {
   width: min(360px, calc(100vw - 32px));

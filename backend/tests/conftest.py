@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from wadiwatch_backend.app import create_app
 from wadiwatch_backend.backend import Backend
 from wadiwatch_backend.contract import CONTRACT_VERSION
+from wadiwatch_backend.downlink import parse_command
 from wadiwatch_backend.site import DEFAULT_SITE_FILE, load_site
 
 # Fixtures for sign-in and the alert log (visitor, officer, signed_in, ...) are in officer_support.py.
@@ -37,6 +38,29 @@ class FakeClock:
         self.now += seconds
 
 
+class GatewayLink:
+    """The way down to the gateway, as the backend sees it.
+
+    It records the commands handed over and does nothing with them: a test
+    says what the gateway does next (`Harness.gateway_relays`). A command that
+    is not worded as the contract words it fails the test that sent it.
+    """
+
+    def __init__(self):
+        # False: the broker cannot be reached, nothing is handed over.
+        self.reachable = True
+        # The commands handed over, as sent and as read back.
+        self.raw = []
+        self.commands = []
+
+    def __call__(self, payload):
+        if not self.reachable:
+            return False
+        self.commands.append(parse_command(payload))
+        self.raw.append(payload)
+        return True
+
+
 class Harness:
     """One backend over one database file, restartable like the real process."""
 
@@ -46,12 +70,16 @@ class Harness:
         self.clock = clock
         self._counters = {}
         self.backend = None
+        # Outlives a restart of the backend, as the broker and the gateway do.
+        self.gateway = GatewayLink()
         self.restart()
 
     def restart(self):
         """Stop the running backend and start a new one on the same file."""
         self.stop()
-        self.backend = Backend(self.db_path, self.site, clock=self.clock)
+        self.backend = Backend(
+            self.db_path, self.site, clock=self.clock, downlink=self.gateway
+        )
         self.client = TestClient(create_app(self.backend))
 
     def stop(self):
@@ -78,6 +106,19 @@ class Harness:
 
     def ingest_raw(self, payload):
         return self.backend.ingest(payload)
+
+    def gateway_relays(self, command):
+        """The gateway acts on an all clear command and reports it, now.
+
+        `command` is one of `gateway.commands`. The gateway transmits an all
+        clear packet for each wadi node of the wadi and sends one `all_clear`
+        message for each, carrying the command's number.
+        """
+        for node in self.site.wadi_nodes_of(command["wadi"]):
+            result = self.ingest(
+                "all_clear", self.site.gateway.id, wadi_node=node.id, command=command["command"]
+            )
+            assert result.status == "stored", result.error
 
     def api(self, path):
         response = self.client.get(path)
@@ -123,6 +164,12 @@ def siren(site):
     return site.siren_nodes[0]
 
 
+@pytest.fixture
+def wadi(site, upstream):
+    """The wadi the site's wadi nodes are mounted over."""
+    return site.wadi_of(upstream.id)
+
+
 def read_jsonl(path):
     with open(path, encoding="utf-8") as lines:
         return [line.rstrip("\n") for line in lines if line.strip()]
@@ -135,6 +182,11 @@ def valid_examples():
 def gateway_output():
     """The messages the gateway core produces, written by the firmware tests."""
     return read_jsonl(CONTRACT_EXAMPLES / "gateway-output.jsonl")
+
+
+def backend_commands():
+    """The commands the backend sends down, which the firmware tests feed the gateway core."""
+    return read_jsonl(CONTRACT_EXAMPLES / "backend-commands.jsonl")
 
 
 def invalid_examples():

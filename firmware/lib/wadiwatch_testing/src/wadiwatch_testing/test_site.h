@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "wadiwatch_testing/fakes.h"
@@ -92,6 +93,7 @@ struct TestSite {
   FakeWallClock wallClock{clock};
   FakeUplink uplink;
   FakeSlotStorage gatewayMessageStorage{kMaxStoredMessages};
+  FakeRandom gatewayRandom;
   std::unique_ptr<WadiNode> wadiNode = makeWadiNode();
   // The second wadi node, `config.downstreamWadiNode`, with its own sensors:
   // `downstream.levelSensor`, `downstream.rainGauge`, `downstream.node` and so on.
@@ -120,6 +122,36 @@ struct TestSite {
   // Takes the gateway out of the site, as if it had lost power: from now on it
   // hears nothing and sends nothing.
   void unplugGateway() { gatewayPluggedIn_ = false; }
+
+  // An officer issues the all clear for a wadi on the dashboard, now: the backend
+  // sends the gateway its command, as docs/gateway-contract.md words it. Returns the
+  // backend's number for the command. The gateway acts on it from its next tick;
+  // allClearSettleMs() is how long the site then needs.
+  uint32_t issueAllClear(WadiId wadi) {
+    const uint32_t command = nextCommand_++;
+    uplink.deliver(allClearCommand(command, wallClock.unixSeconds(), wadi));
+    return command;
+  }
+
+  // The all clear for the site's first wadi: the one the prototype's wadi nodes are on.
+  uint32_t issueAllClear() { return issueAllClear(config.gateway.wadis[0].id); }
+
+  // The backend's all clear command as it travels down the uplink.
+  static std::string allClearCommand(uint32_t command, uint32_t issuedAtUnixSeconds, WadiId wadi) {
+    return "{\"v\":1,\"kind\":\"all_clear\",\"command\":" + std::to_string(command) +
+           ",\"ts\":" + std::to_string(issuedAtUnixSeconds) + ",\"wadi\":" + std::to_string(wadi) +
+           "}";
+  }
+
+  // The longest it takes from the command until every all clear packet it calls for
+  // has had all its transmissions, when every wadi node is heard or none is: the
+  // time the gateway holds an all clear for a silent node, then each packet in turn.
+  uint64_t allClearSettleMs() const {
+    const AlertRepeatConfig& repeat = config.gateway.allClearRepeat;
+    const uint64_t perPacketMs =
+        kStepMs + static_cast<uint64_t>(repeat.transmissions) * repeat.maxSpacingMs;
+    return config.gateway.allClearHoldMs + kMaxWadiNodesPerWadi * perPacketMs;
+  }
 
   void runMinutes(uint64_t minutes) { runMs(minutes * 60 * 1000); }
 
@@ -280,10 +312,12 @@ struct TestSite {
   std::unique_ptr<Gateway> makeGateway() {
     return std::unique_ptr<Gateway>(new Gateway(config.gateway, config.auth, recipients, clock,
                                                 gatewayRadio, modem, gatewayStorage, wallClock,
-                                                uplink, gatewayMessageStorage));
+                                                uplink, gatewayMessageStorage, gatewayRandom));
   }
 
   bool gatewayPluggedIn_ = true;
+  // The backend numbers its commands from one.
+  uint32_t nextCommand_ = 1;
 };
 
 }  // namespace testing

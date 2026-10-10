@@ -14,7 +14,6 @@ using wadiwatch::PacketKind;
 using wadiwatch::SiteAuth;
 using wadiwatch::testing::FakeStorage;
 using wadiwatch::testing::Frame;
-using wadiwatch::testing::ScriptedGateway;
 using wadiwatch::testing::SirenSound;
 using wadiwatch::testing::TestSite;
 
@@ -108,17 +107,24 @@ static void test_signed_alert_from_a_node_outside_the_site_does_not_sound_the_si
   TEST_ASSERT_FALSE(sirenSounds(site));
 }
 
+// An officer issues the all clear on the dashboard and the gateway relays it.
+static void issueAllClear(TestSite& site) {
+  site.issueAllClear();
+  site.runMs(site.allClearSettleMs());
+}
+
 static void test_replayed_alert_does_not_sound_the_siren() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  TestSite site;
   floodWadi(site);
   TEST_ASSERT_TRUE(sirenSounds(site));
   const Frame recorded = site.framesOnAir(PacketKind::Alert).back();
 
-  // The wadi node goes off the air, so that nothing but the recording can sound the
-  // siren again, and the event ends with an all clear, which silences the siren.
-  site.unplugWadiNode();
-  site.air.inject(gateway.allClear(site.config.wadiNode.id));
+  // The flood passes and the event ends with an all clear. The siren falls silent and
+  // the wadi node, still on the air, drops its alert: from here on nothing but the
+  // recording could sound the siren again.
+  site.levelSensor.setWaterLevelCm(0);
+  site.runMinutes(2);
+  issueAllClear(site);
   TEST_ASSERT_FALSE(sirenSounds(site));
   // A power cycle does not make the siren node forget what it accepted.
   site.restartSirenNode();
@@ -129,13 +135,12 @@ static void test_replayed_alert_does_not_sound_the_siren() {
 }
 
 static void test_wadi_node_restarted_during_a_flood_is_still_believed() {
-  ScriptedGateway gateway;
-  TestSite site(gateway.config);
+  TestSite site;
   floodWadi(site);
   TEST_ASSERT_TRUE(sirenSounds(site));
   // The wadi node loses power and, while it is off, an all clear silences the siren.
   site.unplugWadiNode();
-  site.air.inject(gateway.allClear(site.config.wadiNode.id));
+  issueAllClear(site);
   TEST_ASSERT_FALSE(sirenSounds(site));
 
   // Power returns: the wadi node restarts, finds the wadi still in flood and raises

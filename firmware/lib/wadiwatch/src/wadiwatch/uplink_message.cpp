@@ -178,6 +178,7 @@ size_t writeUplinkMessage(const Packet& packet,
       message.text("alert_level", alertLevel);
       message.tenths("level_cm", alert.levelMm);
       message.tenths("rise_cm_min", alert.rateOfRiseMmPerMin);
+      message.flag("refresh", alert.refresh);
       break;
     }
     case PacketKind::Acknowledgement: {
@@ -204,6 +205,7 @@ size_t writeUplinkMessage(const Packet& packet,
     }
     case PacketKind::AllClear:
       message.number("wadi_node", packet.allClear.wadiNode);
+      message.number("command", packet.allClear.command);
       break;
     case PacketKind::Test:
       break;

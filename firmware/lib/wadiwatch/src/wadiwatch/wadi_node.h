@@ -1,4 +1,10 @@
 // Wadi node core: measures the water level and decides the alert level itself.
+//
+// Alert levels only go up by themselves. They come down through an accepted all
+// clear naming this node: the alert level returns to none, the node stops sending
+// its alert again, forgets what it heard from its upstream node and, once the
+// quiet period has passed, goes back to dry mode. If the water still calls for an
+// alert, the node raises it again at once, as a new one.
 #pragma once
 
 #include <cstdint>
@@ -38,13 +44,15 @@ class WadiNode {
  private:
   void countRain(uint64_t nowMs);
   void measure(uint64_t nowMs);
-  void handleReceivedFrames();
+  void handleReceivedFrames(uint64_t nowMs);
+  void handleAllClear(const Packet& allClear, uint64_t nowMs);
+  bool holdsWhatAnAllClearEnds() const;
   void raiseAlertLevel(uint64_t nowMs);
   bool hasAlertToResend() const;
-  void announceAlert(uint64_t nowMs);
+  void announceAlert(uint64_t nowMs, bool refresh);
   void resendAlert(uint64_t nowMs);
   void switchReceiver(uint64_t nowMs);
-  void sendAlert();
+  void sendAlert(bool refresh);
   void repeatAlert(uint64_t nowMs);
   void sendReading(uint64_t nowMs);
   void sendHeartbeat();
@@ -68,6 +76,8 @@ class WadiNode {
   AlertRepeater alertRepeater_;
   UpstreamLink upstream_;
   bool receiverOn_ = false;
+  // The receiver stays on until then after a transmission, for the gateway's answer.
+  uint64_t answerWindowEndsAtMs_ = 0;
   uint64_t nextAlertResendAtMs_ = 0;
   bool started_ = false;
   uint64_t nextMeasurementAtMs_ = 0;

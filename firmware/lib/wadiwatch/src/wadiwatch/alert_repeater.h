@@ -1,7 +1,8 @@
 // Repeats of an alert. A wadi node transmits each alert several times, a random time
 // apart, so that one lost transmission or one collision does not lose the alert.
 // Every transmission carries the same bytes: receivers act on the first copy they
-// hear and their packet codec refuses the others.
+// hear and their packet codec refuses the others. The gateway repeats each all
+// clear packet in the same way.
 #pragma once
 
 #include <cstddef>
@@ -31,6 +32,9 @@ class AlertRepeater {
   // further transmissions. An older alert still being repeated is dropped, since
   // receivers that hear the newer one would refuse it anyway.
   void start(const uint8_t* frame, size_t length, uint64_t nowMs);
+
+  // Drops the transmissions still to come: what was being repeated no longer holds.
+  void cancel() { remaining_ = 0; }
 
   // Whether a transmission is still to come. It is due at dueAtMs().
   bool pending() const { return remaining_ > 0; }
