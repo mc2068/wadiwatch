@@ -4,7 +4,9 @@
 #include <cstdint>
 
 #include "wadiwatch_testing/fakes.h"
+#include "wadiwatch/gateway.h"
 #include "wadiwatch/packet.h"
+#include "wadiwatch/recipients.h"
 #include "wadiwatch/siren_node.h"
 #include "wadiwatch/site_config.h"
 #include "wadiwatch/wadi_node.h"
@@ -26,9 +28,15 @@ struct TestSite {
   FakeSirenOutput siren;
   WadiNode wadiNode{config.wadiNode, clock, levelSensor, air.join()};
   SirenNode sirenNode{config.sirenNode, clock, air.join(), siren};
+  // The recipient list entered on the gateway.
+  RecipientList recipients;
+  FakeGsmModem modem;
+  Gateway gateway{config.gateway, recipients, clock, air.join(), modem};
 
   TestSite() : TestSite(prototypeSite()) {}
-  explicit TestSite(const SiteConfig& siteConfig) : config(siteConfig) {}
+  explicit TestSite(const SiteConfig& siteConfig) : TestSite(siteConfig, prototypeRecipients()) {}
+  TestSite(const SiteConfig& siteConfig, const RecipientList& recipientList)
+      : config(siteConfig), recipients(recipientList) {}
 
   // Advances simulated time one step at a time, ticking every device.
   void runMs(uint64_t durationMs) {
@@ -36,8 +44,13 @@ struct TestSite {
       clock.advanceMs(kStepMs);
       wadiNode.tick();
       sirenNode.tick();
+      if (gatewayPluggedIn_) gateway.tick();
     }
   }
+
+  // Takes the gateway out of the site, as if it had lost power: from now on it
+  // hears nothing and sends nothing.
+  void unplugGateway() { gatewayPluggedIn_ = false; }
 
   void runMinutes(uint64_t minutes) { runMs(minutes * 60 * 1000); }
 
@@ -72,6 +85,9 @@ struct TestSite {
     if (!heardSounding) return SirenSound::Silent;
     return heardSilence ? SirenSound::Intermittent : SirenSound::Continuous;
   }
+
+ private:
+  bool gatewayPluggedIn_ = true;
 };
 
 }  // namespace testing

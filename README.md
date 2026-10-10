@@ -10,7 +10,7 @@ Solar-powered wadi nodes measure water level and rainfall, decide the alert leve
 |---|---|
 | `CONTEXT.md` | Project vocabulary and fixed constraints |
 | `docs/adr/` | Design decisions and their reasons |
-| `firmware/` | Wadi node and siren node firmware, with tests that run on a PC |
+| `firmware/` | Wadi node, siren node and gateway firmware, with tests that run on a PC |
 | `report/NEXUS_Phase1_Report.docx` | Phase 1 report (editable) |
 | `report/NEXUS_Phase1_Report_preview.pdf` | Same content rendered to PDF |
 | `report/video_script.md` | 2-minute video pitch script |
@@ -32,7 +32,7 @@ node build.js
 
 ## Firmware
 
-The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
+The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output, GSM modem). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
 
 Setup, once:
 
@@ -53,7 +53,7 @@ cd firmware
 pio test -e native
 ```
 
-Build the wadi node and siren node firmware for the ESP32:
+Build the wadi node, siren node and gateway firmware for the ESP32:
 
 ```bash
 cd firmware
@@ -62,4 +62,6 @@ pio run
 
 If `pio` is not on the PATH, use `python -m platformio` in its place. The board is set in `firmware/platformio.ini`; node identifiers and thresholds are set only in the site configuration inside the `wadiwatch` library.
 
-The hardware adapters (sensor, LoRa radio, siren driver) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway and dashboard will be added during the prototype phase.
+The hardware adapters (sensor, LoRa radio, siren driver, GSM modem) are not written yet, so the ESP32 builds currently run the cores against placeholders. The dashboard will be added during the prototype phase.
+
+The gateway sends SMS to the registered recipients. The recipient list committed in the `wadiwatch` library (`prototype_recipients.cpp`) holds fake numbers only, and a test fails if any other number is committed: real numbers are personal data, belong in local configuration on the gateway and never in the repository. The Arabic and French SMS texts are all in `sms_templates.cpp`.
