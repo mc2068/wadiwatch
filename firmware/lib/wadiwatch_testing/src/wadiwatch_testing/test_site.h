@@ -27,7 +27,9 @@ struct TestSite {
   FakeClock clock;
   Air air;
   FakeSleepControl wadiNodeSleep{clock};
-  FakeLevelSensor levelSensor{config.wadiNode.mountingHeightCm};
+  FakeLevelSensor levelSensor{config.wadiNode.mountingHeightCm,
+                              config.wadiNode.levelSensor.referenceTemperatureC};
+  FakeTemperatureSensor temperatureSensor;
   FakeRainGauge rainGauge{config.wadiNode.rain.mmPerTip, wadiNodeSleep};
   FakeNodeHealth wadiNodeHealth;
   FakeSirenOutput siren;
@@ -91,6 +93,22 @@ struct TestSite {
     return packets;
   }
 
+  // The frames behind packetsOnAir(kind), byte for byte as they were transmitted:
+  // what a third radio listening in would have recorded. For scenarios that
+  // alter or replay a genuine frame.
+  std::vector<Frame> framesOnAir(PacketKind kind) const {
+    FakeStorage listenerStorage;
+    PacketCodec listener(config.auth, nodeIdOutsideSite(), listenerStorage);
+    std::vector<Frame> frames;
+    for (const Frame& frame : air.transmitted()) {
+      Packet packet;
+      if (listener.decode(frame.data(), frame.size(), packet) && packet.kind == kind) {
+        frames.push_back(frame);
+      }
+    }
+    return frames;
+  }
+
   // The alert level carried by the most recent alert packet put on the air,
   // or None when no alert has been transmitted.
   AlertLevel latestAlertOnAir() const {
@@ -147,7 +165,7 @@ struct TestSite {
   std::unique_ptr<WadiNode> makeWadiNode() {
     return std::unique_ptr<WadiNode>(
         new WadiNode(config.wadiNode, config.auth, clock, wadiNodeSleep, levelSensor, rainGauge,
-                     wadiNodeHealth, wadiNodeRadio, wadiNodeStorage));
+                     wadiNodeHealth, wadiNodeRadio, wadiNodeStorage, &temperatureSensor));
   }
 
   std::unique_ptr<SirenNode> makeSirenNode() {

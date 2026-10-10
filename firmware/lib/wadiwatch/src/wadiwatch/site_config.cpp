@@ -51,6 +51,13 @@ SiteConfig makePrototypeSite() {
       /* wadiNode */ {
           /* id */ kWadiNodeId,
           /* mountingHeightCm */ 300.0f,
+          /* levelSensor */ {
+              /* minDistanceCm */ 25.0f,
+              // Without a temperature reading, air at -10 C makes the dry bed read
+              // 17 cm low over this mounting height.
+              /* bedToleranceCm */ 20.0f,
+              /* referenceTemperatureC */ 20.0f,
+          },
           /* alertThresholds */ {
               /* bankFullDepthCm */ 200.0f,
               /* watchLevelPercent */ 30.0f,
@@ -58,6 +65,8 @@ SiteConfig makePrototypeSite() {
               /* evacuateLevelPercent */ 75.0f,
               /* watchRainMm */ 10.0f,
               /* watchRainWindowMs */ 30u * kMinuteMs,
+              /* warningRateOfRiseCmPerMin */ 5.0f,
+              /* warningRateOfRiseSustainMs */ 3u * kMinuteMs,
           },
           /* mode */ {
               /* dryMeasureIntervalMs */ 15u * kMinuteMs,
@@ -66,6 +75,9 @@ SiteConfig makePrototypeSite() {
           },
           /* rain */ {
               /* mmPerTip */ 0.2f,
+          },
+          /* rateOfRise */ {
+              /* windowMs */ 5u * kMinuteMs,
           },
           /* heartbeatIntervalMs */ 60u * kMinuteMs,
       },

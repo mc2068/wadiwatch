@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "wadiwatch/level_measurement.h"
 #include "wadiwatch/ports.h"
 
 namespace wadiwatch {
@@ -56,15 +57,55 @@ class FakeSleepControl : public SleepControl {
 };
 
 // Scenarios speak in water level; the fake reports the distance a real sensor would see.
+// Every call is one ping. Pings see the water unless a scenario scripts something else
+// for them: debris or spray in the beam, a reading no wadi could give, no echo at all.
 class FakeLevelSensor : public LevelSensor {
  public:
-  explicit FakeLevelSensor(float mountingHeightCm) : mountingHeightCm_(mountingHeightCm) {}
+  // `referenceTemperatureC` is the air temperature the sensor works out its distances for.
+  FakeLevelSensor(float mountingHeightCm, float referenceTemperatureC)
+      : mountingHeightCm_(mountingHeightCm),
+        referenceTemperatureC_(referenceTemperatureC),
+        airTemperatureC_(referenceTemperatureC) {}
 
   void setWaterLevelCm(float levelCm) { waterLevelCm_ = levelCm; }
 
+  // The air over the wadi. The sensor times its echo and knows nothing of the air:
+  // in warmer air sound is faster, the echo is back sooner, and the sensor reports
+  // the water nearer than it is. Until this is called the air is at the sensor's
+  // reference temperature and the reported distances are exact.
+  void setAirTemperatureC(float temperatureC) { airTemperatureC_ = temperatureC; }
+
+  // The next ping not yet scripted is returned by something at this height above
+  // the bed instead of by the water. Scripted pings are used up one per ping, in order.
+  void scriptPingLevelCm(float levelCm) {
+    script_.push_back({ScriptedPing::Echo, reported(mountingHeightCm_ - levelCm)});
+  }
+
+  // The next ping not yet scripted makes the sensor report exactly this distance,
+  // whatever is in front of it.
+  void scriptPingDistanceCm(float distanceCm) {
+    script_.push_back({ScriptedPing::Echo, distanceCm});
+  }
+
+  // The next ping not yet scripted gets no echo: the sensor has no reading.
+  void scriptPingWithoutEcho() { script_.push_back({ScriptedPing::NoEcho, 0.0f}); }
+
+  // From now on no ping gets an echo (a dead or unplugged sensor), or pings work again.
+  void setEchoing(bool echoing) { echoing_ = echoing; }
+
+  size_t scriptedPingsLeft() const { return script_.size(); }
+
   bool readDistanceCm(float& distanceCm) override {
     ++readCount_;
-    distanceCm = mountingHeightCm_ - waterLevelCm_;
+    if (!script_.empty()) {
+      const ScriptedPing ping = script_.front();
+      script_.pop_front();
+      if (ping.kind == ScriptedPing::NoEcho) return false;
+      distanceCm = ping.distanceCm;
+      return true;
+    }
+    if (!echoing_) return false;
+    distanceCm = reported(mountingHeightCm_ - waterLevelCm_);
     return true;
   }
 
@@ -72,9 +113,47 @@ class FakeLevelSensor : public LevelSensor {
   size_t readCount() const { return readCount_; }
 
  private:
+  struct ScriptedPing {
+    enum Kind { Echo, NoEcho };
+    Kind kind;
+    float distanceCm;
+  };
+
+  // What the sensor makes of an echo from this far away, in the air as it is.
+  float reported(float distanceCm) const {
+    if (airTemperatureC_ == referenceTemperatureC_) return distanceCm;
+    return distanceCm * speedOfSoundMps(referenceTemperatureC_) / speedOfSoundMps(airTemperatureC_);
+  }
+
   float mountingHeightCm_;
+  float referenceTemperatureC_;
+  float airTemperatureC_;
   float waterLevelCm_ = 0;
+  bool echoing_ = true;
+  std::deque<ScriptedPing> script_;
   size_t readCount_ = 0;
+};
+
+// The thermometer beside the level sensor. It has no reading until a scenario gives it one.
+class FakeTemperatureSensor : public TemperatureSensor {
+ public:
+  void setTemperatureC(float temperatureC) {
+    available_ = true;
+    temperatureC_ = temperatureC;
+  }
+
+  // The thermometer stops answering.
+  void setUnavailable() { available_ = false; }
+
+  bool readTemperatureC(float& temperatureC) override {
+    if (!available_) return false;
+    temperatureC = temperatureC_;
+    return true;
+  }
+
+ private:
+  bool available_ = false;
+  float temperatureC_ = 0;
 };
 
 // A tipping-bucket gauge wired to the device's wake-up pin: every tip wakes a sleeping device.

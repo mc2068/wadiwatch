@@ -19,12 +19,20 @@ struct AlertThresholds {
   // Rain alone raises Watch: at least this much rain within a window of this length.
   float watchRainMm;
   uint32_t watchRainWindowMs;
+  // A fast rise alone raises Warning, however low the level: a rate of rise of
+  // at least this much, sustained for this long.
+  float warningRateOfRiseCmPerMin;
+  uint32_t warningRateOfRiseSustainMs;
 };
 
 struct AlertInputs {
   // Filtered water level above the wadi bed.
   float levelCm;
-  float rateOfRiseCmPerMin;
+  // The rate of rise that has been sustained for the whole of
+  // `AlertThresholds::warningRateOfRiseSustainMs` ending now; zero when the level
+  // has not been measured for that long. The caller follows the level over that
+  // time; the engine only compares the rate.
+  float sustainedRateOfRiseCmPerMin;
   // Rain that fell during the window of `AlertThresholds::watchRainWindowMs` ending now.
   // The caller measures it over that window; the engine only compares the amount.
   float rainInWindowMm;

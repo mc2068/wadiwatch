@@ -54,7 +54,8 @@ struct HeartbeatPayload {
   int16_t signalStrengthDbm;
   // Wadi nodes only: the last measured level. Meaningful only when hasLastLevel is set.
   uint16_t lastLevelMm;
-  // Wadi nodes only: readings discarded as physically impossible. Stops counting at 255.
+  // Wadi nodes only: level-sensor pings discarded since the previous heartbeat, for
+  // giving no echo or a physically impossible distance. Stops counting at 255.
   uint8_t discardedReadings;
   bool tamper;
   // False until the node has taken a level measurement (and always false for a siren node).

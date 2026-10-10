@@ -26,9 +26,20 @@ class SleepControl {
 class LevelSensor {
  public:
   virtual ~LevelSensor() = default;
-  // Distance from the sensor face down to the water surface (or the dry bed).
+  // One ultrasonic ping: the distance from the sensor face down to whatever
+  // returned the echo, normally the water surface (or the dry bed). Unfiltered:
+  // the core takes several pings per measurement and filters them itself.
   // Returns false when no reading could be taken.
   virtual bool readDistanceCm(float& distanceCm) = 0;
+};
+
+// The air temperature at the level sensor, used to correct the speed of sound.
+// Optional hardware: a wadi node without it measures the level uncorrected.
+class TemperatureSensor {
+ public:
+  virtual ~TemperatureSensor() = default;
+  // Returns false when no trustworthy reading could be taken.
+  virtual bool readTemperatureC(float& temperatureC) = 0;
 };
 
 class RainGauge {
