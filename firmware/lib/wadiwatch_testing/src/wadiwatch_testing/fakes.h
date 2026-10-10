@@ -259,5 +259,97 @@ class FakeGsmModem : public GsmModem {
   std::vector<Sms> refused_;
 };
 
+// The time of day as the gateway learns it from the network. The simulated clock
+// keeps the true time; a scenario decides whether the gateway knows it.
+class FakeWallClock : public WallClock {
+ public:
+  // The time of day when the simulated clock reads zero: 2026-10-10 00:00:00 UTC.
+  // Any fixed instant would do.
+  static constexpr uint32_t kStartUnixSeconds = 1791590400u;
+
+  explicit FakeWallClock(const Clock& clock) : clock_(clock) {}
+
+  bool nowUnixSeconds(uint32_t& unixSeconds) override {
+    if (!known_) return false;
+    unixSeconds = this->unixSeconds();
+    return true;
+  }
+
+  // The true time of day, whether or not the gateway knows it.
+  uint32_t unixSeconds() const {
+    return kStartUnixSeconds + static_cast<uint32_t>(clock_.nowMs() / 1000);
+  }
+
+  // As after power-on with no network yet: the gateway cannot tell the time.
+  void forgetTime() { known_ = false; }
+  void learnTime() { known_ = true; }
+
+ private:
+  const Clock& clock_;
+  bool known_ = true;
+};
+
+// The backend as the gateway's uplink sees it. Records every message it took, in order.
+class FakeUplink : public Uplink {
+ public:
+  bool publish(const char* message, size_t length) override {
+    ++attempts_;
+    if (outage_) return false;
+    published_.push_back(std::string(message, length));
+    return true;
+  }
+
+  // During an outage the uplink is offline and takes nothing.
+  void startOutage() { outage_ = true; }
+  void endOutage() { outage_ = false; }
+
+  // The messages that reached the backend, in order.
+  const std::vector<std::string>& published() const { return published_; }
+  // How many times the gateway offered a message, taken or not.
+  size_t attempts() const { return attempts_; }
+
+ private:
+  bool outage_ = false;
+  size_t attempts_ = 0;
+  std::vector<std::string> published_;
+};
+
+// Stands for the gateway's flash: slots that outlive the core they are given to.
+class FakeSlotStorage : public SlotStorage {
+ public:
+  explicit FakeSlotStorage(size_t slotCount) : slotCount_(slotCount) {}
+
+  // Fits a store of another size. Only before the device first runs.
+  void setSlotCount(size_t slotCount) { slotCount_ = slotCount; }
+
+  size_t slotCount() override { return slotCount_; }
+
+  bool read(size_t slot, uint8_t* data) override {
+    const auto found = slots_.find(slot);
+    if (slot >= slotCount_ || found == slots_.end()) return false;
+    std::memcpy(data, found->second.data(), kStorageSlotSize);
+    return true;
+  }
+
+  bool write(size_t slot, const uint8_t* data) override {
+    if (slot >= slotCount_) return false;
+    slots_[slot] = Frame(data, data + kStorageSlotSize);
+    return true;
+  }
+
+  // What worn flash or a power cut in the middle of a write can leave behind: one
+  // bit is flipped in one slot that has been written. Returns false when no slot
+  // has been written yet.
+  bool damageOneSlot() {
+    if (slots_.empty()) return false;
+    slots_.begin()->second[kStorageSlotSize / 4] ^= 0x01;
+    return true;
+  }
+
+ private:
+  size_t slotCount_;
+  std::map<size_t, Frame> slots_;
+};
+
 }  // namespace testing
 }  // namespace wadiwatch

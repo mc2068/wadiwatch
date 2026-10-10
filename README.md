@@ -66,9 +66,11 @@ If `pio` is not on the PATH, use `python -m platformio` in its place. The board 
 
 Every radio packet is signed with a key shared by the nodes of one site, and a node ignores packets that are not signed with it, come from a node outside the site, or repeat an earlier packet. The key in the repository is a published test key, for tests and the bench only. A real site key never goes into the repository: put it in `firmware/lib/wadiwatch/src/wadiwatch/site_key_local.h`, which git ignores, as described at the top of `site_config.cpp`.
 
-The hardware adapters (sensor, LoRa radio, siren driver, GSM modem, flash storage) are not written yet, so the ESP32 builds currently run the cores against placeholders.
+The hardware adapters (sensor, LoRa radio, siren driver, GSM modem, uplink, network time, flash storage) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway's placeholder clock never knows the time of day, so that build holds its messages and forwards none.
 
-The gateway sends SMS to the registered recipients, for alerts it accepts by the same rules as a siren node. It does not send anything to the backend yet. The recipient list committed in the `wadiwatch` library (`prototype_recipients.cpp`) holds fake numbers only, and a test fails if any other number is committed: real numbers are personal data, belong in local configuration on the gateway and never in the repository. The Arabic and French SMS texts are all in `sms_templates.cpp`.
+One firmware test, `test_gateway_contract`, compares what the gateway core sends with `docs/gateway-contract/gateway-output.jsonl`, the file the backend tests ingest. It finds the file from `firmware/` or from the repository root; started from anywhere else, set `WADIWATCH_CONTRACT_DIR` to the directory. The contract document says how to rewrite the file after an intended change.
+
+The gateway sends SMS to the registered recipients, for alerts it accepts by the same rules as a siren node. It also forwards every packet it accepts to the backend, as the messages of `docs/gateway-contract.md`, each with the time the packet was received. While the uplink is down the messages wait in a store that survives a restart and are forwarded in order when it returns; what gives way when that store is full is in the contract document under "Held messages". SMS do not wait for the uplink. The recipient list committed in the `wadiwatch` library (`prototype_recipients.cpp`) holds fake numbers only, and a test fails if any other number is committed: real numbers are personal data, belong in local configuration on the gateway and never in the repository. The Arabic and French SMS texts are all in `sms_templates.cpp`.
 
 ## Backend and dashboard
 

@@ -89,6 +89,17 @@ constexpr size_t kPacketSize = 24;
 // Size to give a receive buffer.
 constexpr size_t kMaxPacketSize = 32;
 
+// A packet without its authentication code is this long: the first bytes of its frame.
+constexpr size_t kPacketContentSize = 16;
+
+// For a device's own storage: the content of a packet it has already accepted (or sent),
+// in the layout of a frame without the authentication code. Returns false, and writes
+// nothing useful, for a packet that makes no sense.
+bool writePacketContent(const Packet& packet, uint8_t* content);
+// Reads back what writePacketContent wrote. Never use this on bytes from the radio:
+// nothing here checks who made them. PacketCodec::decode is the only way in from the air.
+bool readPacketContent(const uint8_t* content, Packet& packet);
+
 constexpr size_t kSiteKeySize = 32;
 constexpr size_t kMaxSiteNodes = 8;
 

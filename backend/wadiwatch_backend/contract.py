@@ -19,6 +19,7 @@ ALERT_LEVELS = ("none", "watch", "warning", "evacuate")
 # Sanity bounds: anything outside is a corrupt message, not a measurement.
 MAX_LEVEL_CM = 10_000
 MAX_RISE_CM_MIN = 1_000
+MAX_RAIN_MM = 10_000
 MIN_RSSI_DBM = -200
 
 WADI_NODE = "wadi_node"
@@ -67,6 +68,7 @@ def _one_of(choices):
 
 _node_id = _integer(1, MAX_UINT16)
 _level_cm = _number(0, MAX_LEVEL_CM)
+_rise_cm_min = _number(-MAX_RISE_CM_MIN, MAX_RISE_CM_MIN)
 
 COMMON_FIELDS = {
     "node": _node_id,
@@ -88,12 +90,26 @@ KINDS = {
         senders=(WADI_NODE,),
         required={
             "level_cm": _level_cm,
-            "rise_cm_min": _number(-MAX_RISE_CM_MIN, MAX_RISE_CM_MIN),
+            "rise_cm_min": _rise_cm_min,
+        },
+        # The gateway sends all three with every reading. They are optional so
+        # that messages written before they existed stay valid.
+        optional={
+            "rain_mm": _number(0, MAX_RAIN_MM),
+            "storm_mode": _boolean,
+            # What the node held when it measured. Only an alert message
+            # changes the alert level the backend shows.
+            "alert_level": _one_of(ALERT_LEVELS),
         },
     ),
     "alert": Kind(
         senders=(WADI_NODE,),
         required={"alert_level": _one_of(ALERT_LEVELS)},
+        # The measurement behind the alert. The gateway sends both.
+        optional={
+            "level_cm": _level_cm,
+            "rise_cm_min": _rise_cm_min,
+        },
     ),
     "acknowledgement": Kind(
         senders=(SIREN_NODE,),

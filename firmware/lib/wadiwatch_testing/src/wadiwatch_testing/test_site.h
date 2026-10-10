@@ -40,6 +40,11 @@ struct TestSite {
   // The recipient list entered on the gateway.
   RecipientList recipients;
   FakeGsmModem modem;
+  // The gateway's way to the backend, the time of day it dates messages with,
+  // and the storage its messages wait in.
+  FakeWallClock wallClock{clock};
+  FakeUplink uplink;
+  FakeSlotStorage gatewayMessageStorage{kMaxStoredMessages};
   std::unique_ptr<WadiNode> wadiNode = makeWadiNode();
   std::unique_ptr<SirenNode> sirenNode = makeSirenNode();
   std::unique_ptr<Gateway> gateway = makeGateway();
@@ -139,8 +144,8 @@ struct TestSite {
     sirenNode = makeSirenNode();
   }
 
-  // The gateway forgets the events in progress; the modem and what it has
-  // already sent are untouched.
+  // The gateway forgets the events in progress; the modem, the uplink and
+  // what they have already sent are untouched.
   void restartGateway() { gateway = makeGateway(); }
 
  private:
@@ -157,7 +162,8 @@ struct TestSite {
 
   std::unique_ptr<Gateway> makeGateway() {
     return std::unique_ptr<Gateway>(new Gateway(config.gateway, config.auth, recipients, clock,
-                                                gatewayRadio, modem, gatewayStorage));
+                                                gatewayRadio, modem, gatewayStorage, wallClock,
+                                                uplink, gatewayMessageStorage));
   }
 
   bool gatewayPluggedIn_ = true;

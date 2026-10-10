@@ -129,6 +129,11 @@ def valid_examples():
     return read_jsonl(CONTRACT_EXAMPLES / "valid.jsonl")
 
 
+def gateway_output():
+    """The messages the gateway core produces, written by the firmware tests."""
+    return read_jsonl(CONTRACT_EXAMPLES / "gateway-output.jsonl")
+
+
 def invalid_examples():
     """(why, raw payload) for every documented malformed message."""
     cases = [json.loads(line) for line in read_jsonl(CONTRACT_EXAMPLES / "invalid.jsonl")]
