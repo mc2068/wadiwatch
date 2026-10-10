@@ -24,12 +24,19 @@
 {"why":"level is not a finite number","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":NaN,\"rise_cm_min\":3.2}"}
 {"why":"level beyond the accepted range","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":1e30,\"rise_cm_min\":3.2}"}
 {"why":"field that is not in the contract","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"depth_cm\":84.5}"}
-{"why":"field that belongs to another kind","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"alert_level\":\"warning\"}"}
+{"why":"field that belongs to another kind","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"battery_mv\":3920}"}
+{"why":"negative rainfall","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"rain_mm\":-1}"}
+{"why":"rainfall is a string","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"rain_mm\":\"12.4\"}"}
+{"why":"storm mode as a number","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"storm_mode\":1}"}
+{"why":"alert level of a reading is not one of the four names","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"alert_level\":\"severe\"}"}
 {"why":"alert without an alert level","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460}"}
 {"why":"alert level is not one of the four names","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"severe\"}"}
 {"why":"alert level as a number","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":2}"}
 {"why":"alert level in capitals","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"Warning\"}"}
 {"why":"alert from a siren node","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":513,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"warning\"}"}
+{"why":"negative level in an alert","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"warning\",\"level_cm\":-5}"}
+{"why":"rate of rise in an alert is a string","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"warning\",\"rise_cm_min\":\"5.1\"}"}
+{"why":"rainfall in an alert","raw":"{\"v\":1,\"kind\":\"alert\",\"node\":257,\"counter\":1042,\"ts\":1791590460,\"alert_level\":\"warning\",\"level_cm\":104.0,\"rise_cm_min\":5.1,\"rain_mm\":12.4}"}
 {"why":"acknowledgement from a wadi node","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":258,\"counter\":17,\"ts\":1791590462,\"wadi_node\":257,\"alert_level\":\"warning\"}"}
 {"why":"acknowledgement that does not name the wadi node","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":513,\"counter\":17,\"ts\":1791590462,\"alert_level\":\"warning\"}"}
 {"why":"acknowledgement of an alert from a node that is not a wadi node","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":513,\"counter\":17,\"ts\":1791590462,\"wadi_node\":513,\"alert_level\":\"warning\"}"}

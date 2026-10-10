@@ -44,6 +44,31 @@ def test_readings_alone_leave_the_alert_level_at_none(harness, upstream):
     assert harness.nodes()[upstream.id]["alert_level"] == "none"
 
 
+def test_the_alert_level_carried_in_a_reading_does_not_change_the_alert_level(harness, upstream):
+    harness.ingest(
+        "reading",
+        upstream.id,
+        level_cm=160.0,
+        rise_cm_min=6.0,
+        rain_mm=14.2,
+        storm_mode=True,
+        alert_level="evacuate",
+    )
+
+    node = harness.nodes()[upstream.id]
+    assert node["level_cm"] == 160.0
+    assert node["alert_level"] == "none"
+
+
+def test_an_alert_may_carry_the_level_that_raised_it(harness, upstream):
+    result = harness.ingest(
+        "alert", upstream.id, alert_level="warning", level_cm=104.0, rise_cm_min=5.1
+    )
+
+    assert result.status == "stored", result.error
+    assert harness.nodes()[upstream.id]["alert_level"] == "warning"
+
+
 def test_alert_changes_the_alert_level_of_that_node_only(harness, clock, upstream, downstream):
     harness.ingest("reading", upstream.id, level_cm=110.0, rise_cm_min=4.0)
     harness.ingest("reading", downstream.id, level_cm=30.0, rise_cm_min=1.0)

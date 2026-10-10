@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "firmware/**"
+      - "docs/gateway-contract/**"
       - ".github/workflows/firmware.yml"
   push:
     branches: [master]
     paths:
       - "firmware/**"
+      - "docs/gateway-contract/**"
       - ".github/workflows/firmware.yml"
 
 permissions:

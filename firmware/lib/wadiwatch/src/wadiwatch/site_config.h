@@ -70,6 +70,14 @@ struct WadiConfig {
   uint8_t wadiNodeCount;
 };
 
+// The battery voltage below which the gateway reports a node as low on battery.
+// Heartbeat packets carry the voltage, not a verdict, and a wadi node and a siren
+// node do not run on the same battery.
+struct BatteryConfig {
+  NodeId node;
+  uint16_t lowBatteryMillivolts;
+};
+
 // The recipient list is not part of this: it stays on the gateway (recipients.h).
 struct GatewayConfig {
   // The gateway is a node of the site: it needs an identifier to keep its own
@@ -80,6 +88,13 @@ struct GatewayConfig {
   // After the GSM modem fails to send an SMS, the gateway waits this long
   // before it asks the modem again.
   uint32_t smsRetryIntervalMs;
+  // One entry per node that sends heartbeats. A node not listed here is never
+  // reported as low on battery.
+  BatteryConfig batteries[kMaxSiteNodes];
+  uint8_t batteryCount;
+  // After the uplink fails to take a message, the gateway waits this long before
+  // it offers the message again.
+  uint32_t uplinkRetryIntervalMs;
 };
 
 struct SiteConfig {

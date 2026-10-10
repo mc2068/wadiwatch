@@ -36,6 +36,8 @@ constexpr size_t kPayloadSize = 8;
 constexpr size_t kAuthCodeOffset = kPayloadOffset + kPayloadSize;
 constexpr size_t kAuthCodeSize = 8;
 static_assert(kAuthCodeOffset + kAuthCodeSize == kPacketSize, "frame layout and size disagree");
+static_assert(kAuthCodeOffset == kPacketContentSize,
+              "a packet's content is its frame up to the authentication code");
 static_assert(kPacketSize <= kMaxPacketSize, "a packet must fit a receive buffer");
 
 constexpr uint8_t kReadingFlagStormMode = 0x01;
@@ -165,6 +167,26 @@ void writeAuthCode(const SiteAuth& auth, const uint8_t* frame, uint8_t* authCode
 }
 
 }  // namespace
+
+// The same bytes as the start of the frame PacketCodec::encode builds for the packet.
+bool writePacketContent(const Packet& packet, uint8_t* content) {
+  if (!writePayload(packet, content + kPayloadOffset)) return false;
+  content[kVersionOffset] = kProtocolVersion;
+  content[kKindOffset] = static_cast<uint8_t>(packet.kind);
+  put16(content + kSenderOffset, packet.sender);
+  put32(content + kCounterOffset, packet.counter);
+  return true;
+}
+
+bool readPacketContent(const uint8_t* content, Packet& packet) {
+  if (content[kVersionOffset] != kProtocolVersion) return false;
+  Packet read = Packet();
+  read.sender = get16(content + kSenderOffset);
+  read.counter = get32(content + kCounterOffset);
+  if (!readPayload(content[kKindOffset], content + kPayloadOffset, read)) return false;
+  packet = read;
+  return true;
+}
 
 PacketCodec::PacketCodec(const SiteAuth& auth, NodeId self, PersistentStorage& storage)
     : auth_(auth), self_(self), storage_(storage), sendCounter_(0), sendCounterLoaded_(false) {

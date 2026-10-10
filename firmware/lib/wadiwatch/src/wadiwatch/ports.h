@@ -136,4 +136,47 @@ class GsmModem {
   virtual bool sendSms(const char* phoneNumber, const char* text) = 0;
 };
 
+// The time of day, which the gateway needs to date what it forwards. It comes from
+// outside (the mobile network or NTP), so after power-on there is a while without it.
+class WallClock {
+ public:
+  virtual ~WallClock() = default;
+  // Unix time in whole seconds, UTC. Returns false while the time is not known.
+  virtual bool nowUnixSeconds(uint32_t& unixSeconds) = 0;
+};
+
+// The gateway's connection to the backend (MQTT, see docs/gateway-contract.md).
+// Only the way up exists so far. The way down (commands from the backend, such as
+// the all clear) uses the same connection and belongs on this port too: add it as
+// a method that hands over the next command received, the way Radio::receive
+// hands over frames.
+class Uplink {
+ public:
+  virtual ~Uplink() = default;
+  // Publishes one message, `length` bytes of UTF-8 JSON, to the backend. Returns
+  // true only once the message has been taken over (the broker confirmed it).
+  // Returns false when the uplink is offline or the message was not confirmed;
+  // the message may still have arrived, and the caller sends it again unchanged.
+  virtual bool publish(const char* message, size_t length) = 0;
+};
+
+// Every slot of a SlotStorage holds this many bytes.
+constexpr size_t kStorageSlotSize = 32;
+
+// Numbered slots of kStorageSlotSize bytes that outlive restarts (flash, FRAM or a
+// file): where the gateway keeps messages until the backend has them. The adapter
+// only reads and writes whole slots; what they mean is the core's business.
+class SlotStorage {
+ public:
+  virtual ~SlotStorage() = default;
+  // How many slots there are. Does not change while the device runs.
+  virtual size_t slotCount() = 0;
+  // Copies a slot into data (kStorageSlotSize bytes). Returns false when the slot
+  // cannot be read; a slot never written may return anything.
+  virtual bool read(size_t slot, uint8_t* data) = 0;
+  // Replaces a slot with data (kStorageSlotSize bytes). Returns false when the
+  // slot could not be written.
+  virtual bool write(size_t slot, const uint8_t* data) = 0;
+};
+
 }  // namespace wadiwatch

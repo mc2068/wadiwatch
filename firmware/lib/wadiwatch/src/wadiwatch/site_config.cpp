@@ -114,6 +114,15 @@ SiteConfig makePrototypeSite() {
           },
           /* wadiCount */ 1,
           /* smsRetryIntervalMs */ 30u * 1000u,
+          // Estimates, to be set from the batteries actually fitted: a single
+          // lithium cell in each wadi node, a 12 V battery in the siren node.
+          /* batteries */ {
+              {/* node */ kWadiNodeId, /* lowBatteryMillivolts */ 3500},
+              {/* node */ kDownstreamWadiNodeId, /* lowBatteryMillivolts */ 3500},
+              {/* node */ kSirenNodeId, /* lowBatteryMillivolts */ 11800},
+          },
+          /* batteryCount */ 3,
+          /* uplinkRetryIntervalMs */ 30u * 1000u,
       },
       /* auth */ {},
       // A 24-byte packet takes 113 ms on the air with these settings. In storm mode at
