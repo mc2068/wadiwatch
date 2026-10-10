@@ -31,6 +31,10 @@ struct AlertInputs {
   // Last alert level heard from the upstream node; None when there is no
   // upstream node or nothing has been heard from it.
   AlertLevel upstreamAlertLevel;
+  // The alert level this node has raised and that no all clear has ended yet; None
+  // when it has no alert. Upstream confirmation counts a Warning in force here
+  // even when the readings no longer call for one.
+  AlertLevel alertLevelInForce;
 };
 
 // Water level at or above which `alertLevel` is raised by level alone.

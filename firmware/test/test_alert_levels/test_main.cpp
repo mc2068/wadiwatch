@@ -60,9 +60,10 @@ void holdLevel(TestSite& site, float levelCm) {
   }
 }
 
-// The flood has passed: the wadi stays dry for long enough that the node goes
-// back to dry mode and measures the dry bed more than once there.
-void stayDryPastTheReturnToDryMode(TestSite& site) {
+// The flood has passed: the wadi stays dry for longer than it takes a node with no
+// alert to go back to dry mode and measure the dry bed more than once there. A node
+// at Warning or above stays in storm mode and measures the dry bed every minute.
+void stayDryLongAfterTheFlood(TestSite& site) {
   const wadiwatch::OperatingModeConfig& mode = site.config.wadiNode.mode;
   site.levelSensor.setWaterLevelCm(0.0f);
   site.runMs(static_cast<uint64_t>(mode.stormQuietMs) + 2ull * mode.dryMeasureIntervalMs);
@@ -202,7 +203,7 @@ static void test_falling_level_does_not_lower_evacuate() {
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
   holdLevel(site, levelWithin(site, AlertLevel::Watch));
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
-  stayDryPastTheReturnToDryMode(site);
+  stayDryLongAfterTheFlood(site);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
@@ -213,7 +214,7 @@ static void test_falling_level_does_not_lower_warning() {
   TestSite site;
   holdLevel(site, levelWithin(site, AlertLevel::Warning));
 
-  stayDryPastTheReturnToDryMode(site);
+  stayDryLongAfterTheFlood(site);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, site.latestAlertOnAir());
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());

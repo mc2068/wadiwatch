@@ -36,9 +36,13 @@ size_t alertsOnAir(const TestSite& site, AlertLevel level) {
   return count;
 }
 
-size_t heartbeatsOnAir(const TestSite& site) {
-  return site.packetsOnAir(PacketKind::Heartbeat).size();
+// These scenarios follow the site's first wadi node. The second one stays in dry
+// mode on a dry bed throughout and sends heartbeats of its own.
+std::vector<Packet> heartbeatsOf(const TestSite& site) {
+  return site.packetsOnAir(PacketKind::Heartbeat, site.config.wadiNode.id);
 }
+
+size_t heartbeatsOnAir(const TestSite& site) { return heartbeatsOf(site).size(); }
 
 // A water level as packets carry it: whole millimetres.
 uint16_t levelMm(float levelCm) { return static_cast<uint16_t>(std::lround(levelCm * 10.0f)); }
@@ -152,7 +156,9 @@ static void test_on_a_dry_day_the_node_measures_every_dry_interval_and_sends_a_h
   TEST_ASSERT_TRUE(observer.heartbeatMinutes.back() + minutes.heartbeatInterval >= day);
 
   // Nothing else goes on the air, and the node wakes only to measure.
-  TEST_ASSERT_EQUAL_UINT(observer.heartbeatMinutes.size(), site.air.transmitted().size());
+  TEST_ASSERT_EQUAL_UINT(observer.heartbeatMinutes.size(), site.wadiNodeRadio.sent().size());
+  TEST_ASSERT_EQUAL_UINT(site.packetsOnAir(PacketKind::Heartbeat).size(),
+                         site.air.transmitted().size());
   TEST_ASSERT_EQUAL_UINT(observer.measurementMinutes.size(), site.wadiNodeSleep.requestCount());
   TEST_ASSERT_FALSE(site.siren.isOn());
 }
@@ -347,7 +353,7 @@ static void test_a_heartbeat_carries_battery_voltage_signal_strength_last_readin
 
   site.runMs(config.heartbeatIntervalMs + kMinuteMs);
 
-  const std::vector<Packet> heartbeats = site.packetsOnAir(PacketKind::Heartbeat);
+  const std::vector<Packet> heartbeats = heartbeatsOf(site);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT16(config.id, heartbeats[0].sender);
   TEST_ASSERT_EQUAL_UINT16(batteryMillivolts, heartbeats[0].heartbeat.batteryMillivolts);
@@ -372,7 +378,7 @@ static void test_each_heartbeat_reports_the_values_of_its_own_hour() {
   site.levelSensor.setWaterLevelCm(lowerLevelCm);
   site.runMs(config.heartbeatIntervalMs);
 
-  const std::vector<Packet> heartbeats = site.packetsOnAir(PacketKind::Heartbeat);
+  const std::vector<Packet> heartbeats = heartbeatsOf(site);
   TEST_ASSERT_EQUAL_UINT(2, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT16(lowerBatteryMillivolts, heartbeats[1].heartbeat.batteryMillivolts);
   TEST_ASSERT_FALSE(heartbeats[1].heartbeat.tamper);

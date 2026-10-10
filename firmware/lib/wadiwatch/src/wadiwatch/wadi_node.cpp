@@ -38,7 +38,8 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
       radio_(radio),
       codec_(auth, config.id, storage),
       mode_(config.mode),
-      rain_(config.rain, config.alertThresholds.watchRainWindowMs) {}
+      rain_(config.rain, config.alertThresholds.watchRainWindowMs),
+      upstream_(config.upstream) {}
 
 void WadiNode::tick() {
   const uint64_t now = clock_.nowMs();
@@ -46,7 +47,12 @@ void WadiNode::tick() {
     started_ = true;
     nextMeasurementAtMs_ = now;
     nextHeartbeatAtMs_ = now + config_.heartbeatIntervalMs;
+    // The receiver stays off except where switchReceiver() turns it on.
+    radio_.setListening(false);
   }
+
+  // A node with an alert to send again does not go back to dry mode.
+  if (hasAlertToResend()) mode_.onAlertInForce(now);
 
   const OperatingMode modeBefore = mode_.mode();
   countRain(now);
@@ -58,9 +64,13 @@ void WadiNode::tick() {
   if (now >= nextMeasurementAtMs_) {
     measure(now);
     nextMeasurementAtMs_ = now + mode_.measureIntervalMs();
+    upstream_.onMeasurement(now);
   }
 
+  handleReceivedFrames();
   raiseAlertLevel(now);
+  resendAlert(now);
+  switchReceiver(now);
 
   if (now >= nextHeartbeatAtMs_) {
     sendHeartbeat();
@@ -89,16 +99,59 @@ void WadiNode::measure(uint64_t nowMs) {
   mode_.onLevel(nowMs, levelCm_ >= watchLevelCm);
 }
 
+// Takes in what the receiver has heard. The codec is the only way in: a frame that
+// is forged, foreign or replayed is dropped here.
+void WadiNode::handleReceivedFrames() {
+  if (!receiverOn_) return;
+  uint8_t frame[kMaxPacketSize];
+  size_t length;
+  while ((length = radio_.receive(frame, sizeof(frame))) > 0) {
+    Packet packet;
+    if (!codec_.decode(frame, length, packet)) continue;
+    upstream_.onPacket(packet);
+  }
+}
+
 // The alert engine decides; this keeps the highest alert level it has called for.
 // Alert levels only escalate automatically; lowering one takes an all clear.
 void WadiNode::raiseAlertLevel(uint64_t nowMs) {
-  // Until the first measurement the level is that of a dry bed. Rate of rise
-  // and the upstream node are not measured yet.
-  const AlertInputs inputs = {levelCm_, 0.0f, rain_.rainMm(nowMs), AlertLevel::None};
+  // Until the first measurement the level is that of a dry bed. The rate of rise
+  // is not measured yet.
+  const AlertInputs inputs = {levelCm_, 0.0f, rain_.rainMm(nowMs), upstream_.alertLevel(),
+                              alertLevel_};
   const AlertLevel evaluated = evaluateAlertLevel(inputs, config_.alertThresholds);
   if (evaluated <= alertLevel_) return;
   alertLevel_ = evaluated;
+  announceAlert(nowMs);
+}
+
+// Watch is announced once. From Warning up the alert is sent again and again, so that
+// a receiver that missed it, and the node downstream, still hear it.
+bool WadiNode::hasAlertToResend() const { return alertLevel_ >= AlertLevel::Warning; }
+
+void WadiNode::announceAlert(uint64_t nowMs) {
   sendAlert();
+  nextAlertResendAtMs_ = nowMs + config_.alertResendIntervalMs;
+}
+
+// Each re-send is a new packet with its own counter: receivers accept it as a refresh.
+void WadiNode::resendAlert(uint64_t nowMs) {
+  if (hasAlertToResend() && nowMs >= nextAlertResendAtMs_) announceAlert(nowMs);
+}
+
+// The upstream link says when the receiver is worth its energy.
+void WadiNode::switchReceiver(uint64_t nowMs) {
+  const bool wanted = upstream_.wantsReceiver(nowMs, mode_.mode(), alertLevel_);
+  if (wanted == receiverOn_) return;
+  if (wanted) {
+    // Only what arrives from now on counts as heard: drop whatever the radio still
+    // holds from before, such as frames that came in before the node first switched it off.
+    uint8_t stale[kMaxPacketSize];
+    while (radio_.receive(stale, sizeof(stale)) > 0) {
+    }
+  }
+  receiverOn_ = wanted;
+  radio_.setListening(wanted);
 }
 
 void WadiNode::sendAlert() {
@@ -130,8 +183,16 @@ void WadiNode::send(Packet& packet) {
 }
 
 void WadiNode::sleepUntilNextDue(uint64_t nowMs) {
-  const uint64_t nextDueAtMs =
+  uint64_t nextDueAtMs =
       nextMeasurementAtMs_ < nextHeartbeatAtMs_ ? nextMeasurementAtMs_ : nextHeartbeatAtMs_;
+  if (hasAlertToResend() && nextAlertResendAtMs_ < nextDueAtMs) {
+    nextDueAtMs = nextAlertResendAtMs_;
+  }
+  // The end of an open receive window is due work too: the receiver has to be switched off.
+  const uint64_t windowEndsAtMs = upstream_.windowEndsAtMs();
+  if (receiverOn_ && windowEndsAtMs > nowMs && windowEndsAtMs < nextDueAtMs) {
+    nextDueAtMs = windowEndsAtMs;
+  }
   if (nextDueAtMs > nowMs) sleep_.requestSleepMs(nextDueAtMs - nowMs);
 }
 

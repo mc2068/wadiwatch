@@ -41,7 +41,13 @@ UnconnectedRainGauge rainGauge;
 UnmeasuredNodeHealth nodeHealth;
 UnconnectedRadio radio;
 UnconnectedStorage storage;
-wadiwatch::WadiNode node(wadiwatch::prototypeSite().wadiNode,
+// Which of the site's wadi nodes this device is: a member of SiteConfig. The
+// wadi_node_downstream environment sets it to the second wadi node.
+#ifndef WADIWATCH_WADI_NODE
+#define WADIWATCH_WADI_NODE wadiNode
+#endif
+
+wadiwatch::WadiNode node(wadiwatch::prototypeSite().WADIWATCH_WADI_NODE,
                          wadiwatch::prototypeSite().auth,
                          espClock,
                          sleepControl,

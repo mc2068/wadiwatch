@@ -24,9 +24,12 @@ float levelThresholdCm(const AlertThresholds& thresholds, AlertLevel alertLevel)
   return 0.0f;
 }
 
-AlertLevel evaluateAlertLevel(const AlertInputs& inputs, const AlertThresholds& thresholds) {
-  // The level and the rain act so far. Rate of rise and the upstream node are
-  // accepted here so that callers already pass them.
+namespace {
+
+// What the node's own readings call for, whatever its upstream node says.
+AlertLevel alertLevelFromReadings(const AlertInputs& inputs, const AlertThresholds& thresholds) {
+  // The level and the rain act so far. The rate of rise is accepted here so
+  // that callers already pass it.
   if (inputs.levelCm >= levelThresholdCm(thresholds, AlertLevel::Evacuate)) {
     return AlertLevel::Evacuate;
   }
@@ -41,6 +44,20 @@ AlertLevel evaluateAlertLevel(const AlertInputs& inputs, const AlertThresholds& 
     return AlertLevel::Watch;
   }
   return AlertLevel::None;
+}
+
+}  // namespace
+
+AlertLevel evaluateAlertLevel(const AlertInputs& inputs, const AlertThresholds& thresholds) {
+  const AlertLevel fromReadings = alertLevelFromReadings(inputs, thresholds);
+  // Upstream confirmation: Warning or above at this node, called for now or already
+  // in force, together with Warning or above at its upstream node calls for Evacuate.
+  const AlertLevel here =
+      fromReadings > inputs.alertLevelInForce ? fromReadings : inputs.alertLevelInForce;
+  if (here >= AlertLevel::Warning && inputs.upstreamAlertLevel >= AlertLevel::Warning) {
+    return AlertLevel::Evacuate;
+  }
+  return fromReadings;
 }
 
 }  // namespace wadiwatch

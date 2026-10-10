@@ -152,6 +152,8 @@ class InMemoryRadio : public Radio {
  public:
   void send(const uint8_t* data, size_t length) override;
 
+  void setListening(bool listening) override { listening_ = listening; }
+
   size_t receive(uint8_t* buffer, size_t capacity) override {
     if (inbox_.empty()) return 0;
     const Frame frame = inbox_.front();
@@ -161,26 +163,38 @@ class InMemoryRadio : public Radio {
     return frame.size();
   }
 
+  // Whether the receiver is on, which is what it costs the battery.
+  bool isListening() const { return listening_; }
+
+  // Every frame this radio transmitted, including ones lost on the way.
+  const std::vector<Frame>& sent() const { return sent_; }
+
  private:
   friend class Air;
-  explicit InMemoryRadio(Air& air) : air_(air) {}
+  InMemoryRadio(Air& air, FakeSleepControl* wakes) : air_(air), wakes_(wakes) {}
 
   Air& air_;
+  // The device this radio's interrupt line wakes when a frame arrives, if any.
+  FakeSleepControl* wakes_;
+  bool listening_ = true;
   std::deque<Frame> inbox_;
+  std::vector<Frame> sent_;
 };
 
-// The shared radio medium: what one radio sends, every other radio receives.
+// The shared radio medium: what one radio sends, every other radio with its receiver on hears.
 class Air {
  public:
-  InMemoryRadio& join() {
-    radios_.push_back(std::unique_ptr<InMemoryRadio>(new InMemoryRadio(*this)));
+  // `wakes` is the sleep control of the device the radio belongs to, for a device
+  // that sleeps: a frame arriving while its receiver is on wakes it.
+  InMemoryRadio& join(FakeSleepControl* wakes = nullptr) {
+    radios_.push_back(std::unique_ptr<InMemoryRadio>(new InMemoryRadio(*this, wakes)));
     return *radios_.back();
   }
 
   // The next `count` transmissions are lost before reaching any receiver.
   void dropNext(size_t count) { framesToDrop_ += count; }
 
-  // Delivers a frame to every radio, as if sent by a transmitter outside the site.
+  // Delivers a frame to every listening radio, as if sent by a transmitter outside the site.
   void inject(const Frame& frame) { deliver(frame, nullptr); }
 
   // Every frame transmitted by a joined radio, including dropped ones.
@@ -200,7 +214,9 @@ class Air {
 
   void deliver(const Frame& frame, const InMemoryRadio* sender) {
     for (auto& radio : radios_) {
-      if (radio.get() != sender) radio->inbox_.push_back(frame);
+      if (radio.get() == sender || !radio->listening_) continue;
+      radio->inbox_.push_back(frame);
+      if (radio->wakes_ != nullptr) radio->wakes_->wake();
     }
   }
 
@@ -210,7 +226,8 @@ class Air {
 };
 
 inline void InMemoryRadio::send(const uint8_t* data, size_t length) {
-  air_.transmit(Frame(data, data + length), this);
+  sent_.push_back(Frame(data, data + length));
+  air_.transmit(sent_.back(), this);
 }
 
 }  // namespace testing

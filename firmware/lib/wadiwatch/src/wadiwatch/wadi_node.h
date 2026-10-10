@@ -8,6 +8,7 @@
 #include "wadiwatch/ports.h"
 #include "wadiwatch/rain_window.h"
 #include "wadiwatch/site_config.h"
+#include "wadiwatch/upstream_link.h"
 
 namespace wadiwatch {
 
@@ -24,14 +25,20 @@ class WadiNode {
            PersistentStorage& storage);
 
   // Call whenever the device is awake. Does whatever is due (counting rain,
-  // measuring, sending a heartbeat), then asks to sleep until the next thing is
-  // due. Safe to call early: a rain-gauge tip wakes the device before its time.
+  // measuring, listening for the upstream node, sending an alert or a heartbeat),
+  // then asks to sleep until the next thing is due. Safe to call early: a
+  // rain-gauge tip or a received frame wakes the device before its time.
   void tick();
 
  private:
   void countRain(uint64_t nowMs);
   void measure(uint64_t nowMs);
+  void handleReceivedFrames();
   void raiseAlertLevel(uint64_t nowMs);
+  bool hasAlertToResend() const;
+  void announceAlert(uint64_t nowMs);
+  void resendAlert(uint64_t nowMs);
+  void switchReceiver(uint64_t nowMs);
   void sendAlert();
   void sendHeartbeat();
   void send(Packet& packet);
@@ -47,6 +54,9 @@ class WadiNode {
   PacketCodec codec_;
   ModeController mode_;
   RainWindow rain_;
+  UpstreamLink upstream_;
+  bool receiverOn_ = false;
+  uint64_t nextAlertResendAtMs_ = 0;
   bool started_ = false;
   uint64_t nextMeasurementAtMs_ = 0;
   uint64_t nextHeartbeatAtMs_ = 0;

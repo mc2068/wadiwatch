@@ -9,6 +9,11 @@ void ModeController::onRain(uint64_t nowMs) {
   mode_ = OperatingMode::Storm;
 }
 
+void ModeController::onAlertInForce(uint64_t nowMs) {
+  quietSinceMs_ = nowMs;
+  mode_ = OperatingMode::Storm;
+}
+
 void ModeController::onLevel(uint64_t nowMs, bool atOrAboveWatchThreshold) {
   if (atOrAboveWatchThreshold) {
     levelAboveWatch_ = true;

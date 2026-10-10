@@ -64,6 +64,8 @@ pio run
 
 If `pio` is not on the PATH, use `python -m platformio` in its place. The board is set in `firmware/platformio.ini`; node identifiers and thresholds are set only in the site configuration inside the `wadiwatch` library.
 
+The prototype site has two wadi nodes on one wadi, and the site configuration says which is upstream of which. `pio run` builds the firmware of the first; `pio run -e wadi_node_downstream` builds the same firmware with the second node's configuration.
+
 Every radio packet is signed with a key shared by the nodes of one site, and a node ignores packets that are not signed with it, come from a node outside the site, or repeat an earlier packet. The key in the repository is a published test key, for tests and the bench only. A real site key never goes into the repository: put it in `firmware/lib/wadiwatch/src/wadiwatch/site_key_local.h`, which git ignores, as described at the top of `site_config.cpp`.
 
 The hardware adapters (sensor, LoRa radio, siren driver, flash storage) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway firmware will be added during the prototype phase.

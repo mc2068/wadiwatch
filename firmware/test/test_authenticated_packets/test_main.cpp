@@ -107,10 +107,16 @@ static void test_signed_alert_from_a_node_outside_the_site_does_not_sound_the_si
 }
 
 static void test_replayed_alert_does_not_sound_the_siren() {
+  // A genuine alert, recorded off the air during a flood.
+  TestSite source;
+  floodWadi(source);
+  const Frame recorded = source.air.transmitted().back();
+
+  // The same site with a dry wadi, so that no wadi node is sending its alert again:
+  // the siren node hears the recorded alert once, as it did during the flood.
   TestSite site;
-  floodWadi(site);
+  site.air.inject(recorded);
   TEST_ASSERT_TRUE(sirenSounds(site));
-  const Frame recorded = site.air.transmitted().back();
 
   // The siren node is power-cycled, which silences it, and remembers what it accepted.
   site.restartSirenNode();
@@ -124,15 +130,22 @@ static void test_replayed_alert_does_not_sound_the_siren() {
 static void test_wadi_node_restarted_during_a_flood_is_still_believed() {
   TestSite site;
   floodWadi(site);
+  // The flood lasts: the wadi node sends its alert again several times and the siren
+  // node accepts each one, so the counters are well past their first values.
+  const uint64_t resendsBeforeTheRestart = 10;
+  site.runMs(resendsBeforeTheRestart * site.config.wadiNode.alertResendIntervalMs);
   TEST_ASSERT_TRUE(sirenSounds(site));
-  site.restartSirenNode();
-  TEST_ASSERT_FALSE(sirenSounds(site));
 
-  // The wadi node restarts, finds the wadi still in flood and raises its alert again.
-  // The siren node accepts it only if the counter carried on from before the restart.
+  // Both nodes lose power together. The siren node comes back silent and remembers
+  // the last counter it accepted; the wadi node finds the wadi still in flood and
+  // raises its alert again.
+  site.restartSirenNode();
   site.restartWadiNode();
   floodWadi(site);
 
+  // The siren node accepts that alert only if the wadi node's counter carried on from
+  // before the restart. Counting from one again, the wadi node would be ignored
+  // until its re-sends had caught up, which takes longer than this.
   TEST_ASSERT_TRUE(sirenSounds(site));
 }
 
