@@ -36,9 +36,13 @@ static_assert(sizeof(kSiteKey) == kSiteKeySize, "the site key must be exactly kS
 
 const NodeId kWadiNodeId = 0x0101;
 const NodeId kSirenNodeId = 0x0201;
+// The backend knows the gateway by this identifier too (backend/site/prototype.json).
+const NodeId kGatewayNodeId = 0x0301;
+// The one wadi of the bench prototype.
+const WadiId kWadi = 1;
 
 // Every node of the site. Packets from any other sender are ignored.
-const NodeId kSiteNodes[] = {kWadiNodeId, kSirenNodeId};
+const NodeId kSiteNodes[] = {kWadiNodeId, kSirenNodeId, kGatewayNodeId};
 const size_t kSiteNodeCount = sizeof(kSiteNodes) / sizeof(kSiteNodes[0]);
 static_assert(kSiteNodeCount <= kMaxSiteNodes, "too many nodes for one site");
 
@@ -69,6 +73,20 @@ SiteConfig makePrototypeSite() {
           /* id */ kSirenNodeId,
           /* intermittentOnMs */ 2000u,
           /* intermittentOffMs */ 2000u,
+      },
+      /* gateway */ {
+          /* id */ kGatewayNodeId,
+          /* wadis */ {
+              {
+                  /* id */ kWadi,
+                  /* nameArabic */ "وادي تجريبي",
+                  /* nameFrench */ "Oued Démo",
+                  /* wadiNodes */ {kWadiNodeId},
+                  /* wadiNodeCount */ 1,
+              },
+          },
+          /* wadiCount */ 1,
+          /* smsRetryIntervalMs */ 30u * 1000u,
       },
       /* auth */ {},
   };

@@ -11,7 +11,7 @@ Solar-powered wadi nodes measure water level and rainfall, decide the alert leve
 | `CONTEXT.md` | Project vocabulary and fixed constraints |
 | `docs/adr/` | Design decisions and their reasons |
 | `docs/gateway-contract.md` | The messages the gateway sends to the backend |
-| `firmware/` | Wadi node and siren node firmware, with tests that run on a PC |
+| `firmware/` | Wadi node, siren node and gateway firmware, with tests that run on a PC |
 | `backend/` | Backend and dashboard: ingests gateway messages, serves the API and the map |
 | `report/NEXUS_Phase1_Report.docx` | Phase 1 report (editable) |
 | `report/NEXUS_Phase1_Report_preview.pdf` | Same content rendered to PDF |
@@ -34,7 +34,7 @@ node build.js
 
 ## Firmware
 
-The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output, persistent storage). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
+The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output, GSM modem, persistent storage). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
 
 Setup, once:
 
@@ -55,7 +55,7 @@ cd firmware
 pio test -e native
 ```
 
-Build the wadi node and siren node firmware for the ESP32:
+Build the wadi node, siren node and gateway firmware for the ESP32:
 
 ```bash
 cd firmware
@@ -66,7 +66,9 @@ If `pio` is not on the PATH, use `python -m platformio` in its place. The board 
 
 Every radio packet is signed with a key shared by the nodes of one site, and a node ignores packets that are not signed with it, come from a node outside the site, or repeat an earlier packet. The key in the repository is a published test key, for tests and the bench only. A real site key never goes into the repository: put it in `firmware/lib/wadiwatch/src/wadiwatch/site_key_local.h`, which git ignores, as described at the top of `site_config.cpp`.
 
-The hardware adapters (sensor, LoRa radio, siren driver, flash storage) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway firmware will be added during the prototype phase.
+The hardware adapters (sensor, LoRa radio, siren driver, GSM modem, flash storage) are not written yet, so the ESP32 builds currently run the cores against placeholders.
+
+The gateway sends SMS to the registered recipients, for alerts it accepts by the same rules as a siren node. It does not send anything to the backend yet. The recipient list committed in the `wadiwatch` library (`prototype_recipients.cpp`) holds fake numbers only, and a test fails if any other number is committed: real numbers are personal data, belong in local configuration on the gateway and never in the repository. The Arabic and French SMS texts are all in `sms_templates.cpp`.
 
 ## Backend and dashboard
 

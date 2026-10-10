@@ -8,6 +8,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "wadiwatch/ports.h"
@@ -212,6 +213,51 @@ class Air {
 inline void InMemoryRadio::send(const uint8_t* data, size_t length) {
   air_.transmit(Frame(data, data + length), this);
 }
+
+struct Sms {
+  std::string phoneNumber;
+  std::string text;
+};
+
+// The mobile network as the gateway's modem sees it. Records every SMS it is
+// asked to send: those it accepted and, during an outage, those it refused.
+class FakeGsmModem : public GsmModem {
+ public:
+  bool sendSms(const char* phoneNumber, const char* text) override {
+    const Sms sms = {phoneNumber, text};
+    if (outage_ || isRejected(sms.phoneNumber)) {
+      refused_.push_back(sms);
+      return false;
+    }
+    sent_.push_back(sms);
+    return true;
+  }
+
+  // During an outage the modem has no network and refuses every SMS.
+  void startOutage() { outage_ = true; }
+  void endOutage() { outage_ = false; }
+
+  // From now on the network refuses every SMS to this number, outage or not.
+  void rejectNumber(const std::string& phoneNumber) { rejectedNumbers_.push_back(phoneNumber); }
+
+  // The SMS that went out to the network, in order.
+  const std::vector<Sms>& sent() const { return sent_; }
+  // The SMS the gateway asked for and the modem refused, in order.
+  const std::vector<Sms>& refused() const { return refused_; }
+
+ private:
+  bool isRejected(const std::string& phoneNumber) const {
+    for (const std::string& rejected : rejectedNumbers_) {
+      if (rejected == phoneNumber) return true;
+    }
+    return false;
+  }
+
+  bool outage_ = false;
+  std::vector<std::string> rejectedNumbers_;
+  std::vector<Sms> sent_;
+  std::vector<Sms> refused_;
+};
 
 }  // namespace testing
 }  // namespace wadiwatch

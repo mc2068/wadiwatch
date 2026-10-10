@@ -89,4 +89,14 @@ inline uint32_t storageKey(StorageRecord record, uint16_t index) {
   return (static_cast<uint32_t>(record) << 16) | index;
 }
 
+// The gateway's GSM modem, as far as SMS go.
+class GsmModem {
+ public:
+  virtual ~GsmModem() = default;
+  // Sends one SMS to one phone number. The number is in international format
+  // (+216...) and the text is UTF-8; both end with a zero byte. Returns false
+  // when the SMS could not be handed to the mobile network.
+  virtual bool sendSms(const char* phoneNumber, const char* text) = 0;
+};
+
 }  // namespace wadiwatch

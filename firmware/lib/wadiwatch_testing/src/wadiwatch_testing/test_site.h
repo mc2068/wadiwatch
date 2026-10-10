@@ -6,7 +6,9 @@
 #include <vector>
 
 #include "wadiwatch_testing/fakes.h"
+#include "wadiwatch/gateway.h"
 #include "wadiwatch/packet.h"
+#include "wadiwatch/recipients.h"
 #include "wadiwatch/siren_node.h"
 #include "wadiwatch/site_config.h"
 #include "wadiwatch/wadi_node.h"
@@ -31,13 +33,21 @@ struct TestSite {
   FakeSirenOutput siren;
   FakeStorage wadiNodeStorage;
   FakeStorage sirenNodeStorage;
+  FakeStorage gatewayStorage;
   InMemoryRadio& wadiNodeRadio = air.join();
   InMemoryRadio& sirenNodeRadio = air.join();
+  InMemoryRadio& gatewayRadio = air.join();
+  // The recipient list entered on the gateway.
+  RecipientList recipients;
+  FakeGsmModem modem;
   std::unique_ptr<WadiNode> wadiNode = makeWadiNode();
   std::unique_ptr<SirenNode> sirenNode = makeSirenNode();
+  std::unique_ptr<Gateway> gateway = makeGateway();
 
   TestSite() : TestSite(prototypeSite()) {}
-  explicit TestSite(const SiteConfig& siteConfig) : config(siteConfig) {}
+  explicit TestSite(const SiteConfig& siteConfig) : TestSite(siteConfig, prototypeRecipients()) {}
+  TestSite(const SiteConfig& siteConfig, const RecipientList& recipientList)
+      : config(siteConfig), recipients(recipientList) {}
 
   // Advances simulated time one step at a time, ticking every device that is awake.
   // The wadi node sleeps between pieces of work; a rain-gauge tip wakes it early.
@@ -46,8 +56,13 @@ struct TestSite {
       clock.advanceMs(kStepMs);
       if (!wadiNodeSleep.isAsleep()) wadiNode->tick();
       sirenNode->tick();
+      if (gatewayPluggedIn_) gateway->tick();
     }
   }
+
+  // Takes the gateway out of the site, as if it had lost power: from now on it
+  // hears nothing and sends nothing.
+  void unplugGateway() { gatewayPluggedIn_ = false; }
 
   void runMinutes(uint64_t minutes) { runMs(minutes * 60 * 1000); }
 
@@ -124,6 +139,10 @@ struct TestSite {
     sirenNode = makeSirenNode();
   }
 
+  // The gateway forgets the events in progress; the modem and what it has
+  // already sent are untouched.
+  void restartGateway() { gateway = makeGateway(); }
+
  private:
   std::unique_ptr<WadiNode> makeWadiNode() {
     return std::unique_ptr<WadiNode>(
@@ -135,6 +154,13 @@ struct TestSite {
     return std::unique_ptr<SirenNode>(new SirenNode(config.sirenNode, config.auth, clock,
                                                     sirenNodeRadio, siren, sirenNodeStorage));
   }
+
+  std::unique_ptr<Gateway> makeGateway() {
+    return std::unique_ptr<Gateway>(new Gateway(config.gateway, config.auth, recipients, clock,
+                                                gatewayRadio, modem, gatewayStorage));
+  }
+
+  bool gatewayPluggedIn_ = true;
 };
 
 }  // namespace testing
