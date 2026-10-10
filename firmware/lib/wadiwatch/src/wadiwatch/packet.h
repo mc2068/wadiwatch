@@ -10,12 +10,25 @@ using NodeId = uint16_t;
 
 enum class AlertLevel : uint8_t { None = 0, Watch = 1, Warning = 2, Evacuate = 3 };
 
-enum class PacketKind : uint8_t { Alert = 1 };
+enum class PacketKind : uint8_t { Alert = 1, Heartbeat = 2 };
+
+// What a heartbeat packet carries.
+struct Heartbeat {
+  uint16_t batteryMillivolts;
+  int8_t signalStrengthDbm;
+  bool tamper;
+  // False until the node has taken a level measurement.
+  bool hasLastLevel;
+  int16_t lastLevelCm;
+};
 
 struct Packet {
   PacketKind kind;
   NodeId sender;
+  // Alert packets only.
   AlertLevel alertLevel;
+  // Heartbeat packets only.
+  Heartbeat heartbeat;
 };
 
 constexpr size_t kMaxPacketSize = 32;

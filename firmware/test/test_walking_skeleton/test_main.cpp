@@ -14,8 +14,8 @@ static void test_level_below_warning_threshold_produces_no_siren_output() {
 
   site.runMinutes(30);
 
+  // This level is above the Watch threshold, so a Watch alert is on the air; Watch never sounds the siren.
   TEST_ASSERT_FALSE(site.siren.isOn());
-  TEST_ASSERT_EQUAL_UINT(0, site.air.transmitted().size());
 }
 
 static void test_level_crossing_warning_threshold_turns_siren_on() {
@@ -41,7 +41,8 @@ static void test_siren_sounds_within_one_measurement_interval_of_the_crossing() 
   site.runMinutes(5);
 
   site.levelSensor.setWaterLevelCm(site.config.wadiNode.warningLevelCm);
-  site.runMs(site.config.wadiNode.measureIntervalMs);
+  // The wadi is dry and there is no rain, so the node is in dry mode.
+  site.runMs(site.config.wadiNode.mode.dryMeasureIntervalMs);
 
   TEST_ASSERT_TRUE(site.siren.isOn());
 }

@@ -15,17 +15,22 @@ struct TestSite {
   SiteConfig config = prototypeSite();
   FakeClock clock;
   Air air;
+  FakeSleepControl wadiNodeSleep{clock};
   FakeLevelSensor levelSensor{config.wadiNode.mountingHeightCm};
+  FakeRainGauge rainGauge{config.wadiNode.rain.mmPerTip, wadiNodeSleep};
+  FakeNodeHealth wadiNodeHealth;
   FakeSirenOutput siren;
-  WadiNode wadiNode{config.wadiNode, clock, levelSensor, air.join()};
+  WadiNode wadiNode{config.wadiNode, clock,          wadiNodeSleep, levelSensor,
+                    rainGauge,       wadiNodeHealth, air.join()};
   SirenNode sirenNode{air.join(), siren};
 
-  // Advances simulated time one second at a time, ticking every device.
+  // Advances simulated time one second at a time, ticking every device that is awake.
+  // The wadi node sleeps between pieces of work; a rain-gauge tip wakes it early.
   void runMs(uint64_t durationMs) {
     const uint64_t stepMs = 1000;
     for (uint64_t elapsed = 0; elapsed < durationMs; elapsed += stepMs) {
       clock.advanceMs(stepMs);
-      wadiNode.tick();
+      if (!wadiNodeSleep.isAsleep()) wadiNode.tick();
       sirenNode.tick();
     }
   }
