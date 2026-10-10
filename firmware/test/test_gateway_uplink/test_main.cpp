@@ -981,6 +981,67 @@ static void test_a_store_holding_only_changes_of_alert_level_gives_up_the_oldest
   assertForwarded({warning, evacuate}, site);
 }
 
+static void test_a_refresh_of_an_alert_the_backend_has_does_not_count_as_a_change() {
+  QuietSite site;
+  site.gatewayMessageStorage.setSlotCount(2);
+  TestRadio& upstream = site.wadiNodeOnAir;
+  TestRadio& downstream = site.downstreamWadiNodeOnAir;
+  // The upstream wadi node reaches Warning while the uplink works: the backend has it,
+  // and the store is empty again.
+  const Packet warningUpstream = site.transmit(upstream, alert(AlertLevel::Warning));
+  TEST_ASSERT_EQUAL_UINT(1, site.uplink.published().size());
+
+  site.uplink.startOutage();
+  const Packet watch = site.transmit(downstream, alert(AlertLevel::Watch));
+  // The upstream wadi node says Warning again, as it does every minute. It tells the
+  // backend nothing new, although no alert of that node is waiting in the store.
+  site.transmit(upstream, alert(AlertLevel::Warning));
+  const Packet warning = site.transmit(downstream, alert(AlertLevel::Warning));
+  endOutage(site);
+
+  // It is the refresh that gave way, not the downstream wadi node's Watch.
+  assertForwarded({warningUpstream, watch, warning}, site);
+}
+
+static void test_a_refresh_tells_the_backend_of_a_change_that_a_full_store_gave_up() {
+  CutOffSite site(2);
+  TestRadio& upstream = site.wadiNodeOnAir;
+  TestRadio& downstream = site.downstreamWadiNodeOnAir;
+  // Three changes of alert level and room for two: the oldest goes, and with it all
+  // the backend would have heard of the upstream wadi node.
+  site.transmit(upstream, alert(AlertLevel::Warning));
+  site.transmit(downstream, alert(AlertLevel::Watch));
+  const Packet warning = site.transmit(downstream, alert(AlertLevel::Warning));
+
+  // To the backend the upstream wadi node's next refresh is news, so it is kept as a
+  // change is, at the cost of the oldest change: the backend must still learn how
+  // things stand now.
+  const Packet refresh = site.transmit(upstream, alert(AlertLevel::Warning));
+  // The one after it is a refresh again.
+  site.transmit(upstream, alert(AlertLevel::Warning));
+  endOutage(site);
+
+  assertForwarded({warning, refresh}, site);
+}
+
+static void test_after_a_restart_the_first_alert_heard_from_a_wadi_node_is_kept_as_a_change() {
+  QuietSite site;
+  site.gatewayMessageStorage.setSlotCount(2);
+  TestRadio& upstream = site.wadiNodeOnAir;
+  const Packet before = site.transmit(upstream, alert(AlertLevel::Warning));
+  TEST_ASSERT_EQUAL_UINT(1, site.uplink.published().size());
+
+  // The gateway no longer knows what the backend has been told.
+  site.restartGateway();
+  site.uplink.startOutage();
+  const Packet first = site.transmit(upstream, alert(AlertLevel::Warning));
+  site.transmit(upstream, alert(AlertLevel::Warning));
+  const Packet evacuate = site.transmit(upstream, alert(AlertLevel::Evacuate));
+  endOutage(site);
+
+  assertForwarded({before, first, evacuate}, site);
+}
+
 static void test_two_wadi_nodes_refreshing_their_alerts_through_a_long_outage_cost_no_change() {
   TestSite site;
   // Room for a few minutes of what the site sends while both wadi nodes are in alert.
@@ -1095,6 +1156,9 @@ int main(int, char**) {
   RUN_TEST(test_a_store_full_of_changes_of_alert_level_does_not_keep_a_refresh);
   RUN_TEST(test_an_alert_after_an_all_clear_is_a_change_even_at_the_level_before_it);
   RUN_TEST(test_a_store_holding_only_changes_of_alert_level_gives_up_the_oldest);
+  RUN_TEST(test_a_refresh_of_an_alert_the_backend_has_does_not_count_as_a_change);
+  RUN_TEST(test_a_refresh_tells_the_backend_of_a_change_that_a_full_store_gave_up);
+  RUN_TEST(test_after_a_restart_the_first_alert_heard_from_a_wadi_node_is_kept_as_a_change);
   RUN_TEST(test_two_wadi_nodes_refreshing_their_alerts_through_a_long_outage_cost_no_change);
   RUN_TEST(test_packets_received_before_the_time_is_known_are_dated_once_it_is);
   RUN_TEST(test_packets_held_undated_through_a_restart_are_dated_at_the_restart);

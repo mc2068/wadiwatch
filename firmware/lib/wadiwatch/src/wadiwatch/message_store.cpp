@@ -10,7 +10,7 @@ namespace {
 //
 //   0      record format
 //   1      flags: received-at is counted from the gateway's start 0x01,
-//          alert that repeats the alert level stored before it 0x02
+//          alert that told the backend nothing new when it was stored 0x02
 //   2-5    sequence: position in the order of arrival, never zero
 //   6-9    received at
 //   10-25  the packet, as packet.h stores one
@@ -30,7 +30,7 @@ constexpr size_t kRecordSize = kCheckOffset + 2;
 static_assert(kRecordSize <= kStorageSlotSize, "a stored message must fit one slot");
 
 constexpr uint8_t kFlagDatedSinceStart = 0x01;
-constexpr uint8_t kFlagRepeatsStoredAlert = 0x02;
+constexpr uint8_t kFlagAlertRefresh = 0x02;
 
 // In the order in which messages give way when the store is full.
 constexpr uint8_t kReading = 0;
@@ -66,7 +66,7 @@ uint16_t checkOf(const uint8_t* data, size_t length) {
   return static_cast<uint16_t>((high << 8) | low);
 }
 
-uint8_t importanceOf(PacketKind kind, bool repeatsStoredAlert) {
+uint8_t importanceOf(PacketKind kind, bool isAlertRefresh) {
   switch (kind) {
     case PacketKind::Reading:
       return kReading;
@@ -76,7 +76,7 @@ uint8_t importanceOf(PacketKind kind, bool repeatsStoredAlert) {
     case PacketKind::Test:
       return kAcknowledgementOrTest;
     case PacketKind::Alert:
-      return repeatsStoredAlert ? kAlertRefresh : kAlertLevelChange;
+      return isAlertRefresh ? kAlertRefresh : kAlertLevelChange;
     case PacketKind::AllClear:
       return kAlertLevelChange;
   }
@@ -138,7 +138,7 @@ void MessageStore::add(const StoredMessage& message) {
   bool isRefresh = false;
   if (alertLevelStated(message.packet, entry.wadiNode, entry.alertLevel)) {
     isRefresh = message.packet.kind == PacketKind::Alert &&
-                repeatsStoredAlert(entry.wadiNode, entry.alertLevel);
+                tellsNothingNew(entry.wadiNode, entry.alertLevel);
   }
   entry.importance = importanceOf(message.packet.kind, isRefresh);
 
@@ -155,7 +155,7 @@ void MessageStore::add(const StoredMessage& message) {
   if (!writePacketContent(message.packet, data + kPacketOffset)) return;
   data[kFormatOffset] = kRecordFormat;
   if (message.datedSinceStart) data[kFlagsOffset] |= kFlagDatedSinceStart;
-  if (isRefresh) data[kFlagsOffset] |= kFlagRepeatsStoredAlert;
+  if (isRefresh) data[kFlagsOffset] |= kFlagAlertRefresh;
   put32(data + kSequenceOffset, entry.sequence);
   put32(data + kReceivedAtOffset, message.receivedAt);
   put16(data + kCheckOffset, checkOf(data, kCheckOffset));
@@ -193,6 +193,9 @@ void MessageStore::removeOldest() {
   // If this write fails the message is found again after a restart and forwarded a
   // second time, which the backend ignores.
   storage_.write(slot, blank);
+  // The backend now knows what this message said of a wadi node's alert level.
+  const Entry& entry = entries_[slot];
+  if (entry.importance >= kAlertRefresh) noteTold(entry.wadiNode, entry.alertLevel);
   entries_[slot].sequence = 0;
 }
 
@@ -212,13 +215,16 @@ bool MessageStore::parse(const uint8_t* data, StoredMessage& message, Entry& ent
   entry = Entry();
   entry.sequence = sequence;
   alertLevelStated(message.packet, entry.wadiNode, entry.alertLevel);
-  entry.importance =
-      importanceOf(message.packet.kind, (flags & kFlagRepeatsStoredAlert) != 0);
+  entry.importance = importanceOf(message.packet.kind, (flags & kFlagAlertRefresh) != 0);
   return true;
 }
 
-// Whether the latest stored word on this wadi node's alert level is already `alertLevel`.
-bool MessageStore::repeatsStoredAlert(NodeId wadiNode, AlertLevel alertLevel) const {
+// Whether the backend, once it has everything stored, will already take this wadi node
+// to be at `alertLevel`. The latest word on the node's alert level is the newest alert
+// or all clear waiting in the store or, when none is waiting, the last one the uplink
+// took. What a full store gave up was never said: a wadi node whose change of alert
+// level was given up is news to the backend again in its next refresh.
+bool MessageStore::tellsNothingNew(NodeId wadiNode, AlertLevel alertLevel) const {
   const Entry* latest = nullptr;
   for (size_t slot = 0; slot < slotCount_; ++slot) {
     const Entry& entry = entries_[slot];
@@ -226,7 +232,25 @@ bool MessageStore::repeatsStoredAlert(NodeId wadiNode, AlertLevel alertLevel) co
     if (entry.wadiNode != wadiNode) continue;
     if (latest == nullptr || entry.sequence > latest->sequence) latest = &entry;
   }
-  return latest != nullptr && latest->alertLevel == alertLevel;
+  if (latest != nullptr) return latest->alertLevel == alertLevel;
+  for (size_t i = 0; i < toldCount_; ++i) {
+    if (told_[i].wadiNode == wadiNode) return told_[i].alertLevel == alertLevel;
+  }
+  return false;
+}
+
+void MessageStore::noteTold(NodeId wadiNode, AlertLevel alertLevel) {
+  for (size_t i = 0; i < toldCount_; ++i) {
+    if (told_[i].wadiNode != wadiNode) continue;
+    told_[i].alertLevel = alertLevel;
+    return;
+  }
+  // No room for one more wadi node: its next alert counts as a change, which costs
+  // a refresh its low place and nothing else.
+  if (toldCount_ >= kMaxSiteNodes) return;
+  told_[toldCount_].wadiNode = wadiNode;
+  told_[toldCount_].alertLevel = alertLevel;
+  ++toldCount_;
 }
 
 bool MessageStore::findOldest(size_t& oldest) const {

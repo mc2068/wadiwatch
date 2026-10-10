@@ -9,8 +9,10 @@
 //   1. readings
 //   2. heartbeats
 //   3. acknowledgements and tests
-//   4. alerts that repeat the alert level of the alert stored before them from the same
-//      wadi node (the refresh a node at Warning or above sends every minute)
+//   4. alerts that tell the backend nothing new: the refresh a wadi node at Warning or
+//      above sends every minute. An alert is one when it repeats the alert level of the
+//      alert or all clear stored before it for the same wadi node or, with none waiting
+//      in the store, of the last one the uplink took
 //   5. alerts that change the alert level, and all clears
 //
 // The arriving packet takes part: if it is less important than everything stored, it is
@@ -62,8 +64,15 @@ class MessageStore {
     AlertLevel alertLevel;
   };
 
+  // What the backend was last told of one wadi node's alert level.
+  struct Told {
+    NodeId wadiNode;
+    AlertLevel alertLevel;
+  };
+
   void loadOnce();
-  bool repeatsStoredAlert(NodeId wadiNode, AlertLevel alertLevel) const;
+  bool tellsNothingNew(NodeId wadiNode, AlertLevel alertLevel) const;
+  void noteTold(NodeId wadiNode, AlertLevel alertLevel);
   bool findOldest(size_t& slot) const;
   bool findLeastImportant(size_t& slot) const;
   bool findFree(size_t& slot);
@@ -79,6 +88,11 @@ class MessageStore {
   uint32_t firstSequenceOfThisRun_ = 1;
   // Where the search for a free slot resumes, so that writes are spread over the storage.
   size_t nextFreeSearch_ = 0;
+  // One per wadi node whose alert or all clear the uplink has taken since the gateway
+  // started. Not stored: after a restart the first alert heard from a wadi node with
+  // none waiting in the store counts as a change of alert level.
+  Told told_[kMaxSiteNodes];
+  size_t toldCount_ = 0;
 };
 
 }  // namespace wadiwatch
