@@ -25,8 +25,8 @@ float levelThresholdCm(const AlertThresholds& thresholds, AlertLevel alertLevel)
 }
 
 AlertLevel evaluateAlertLevel(const AlertInputs& inputs, const AlertThresholds& thresholds) {
-  // Only the level acts so far. Rate of rise, rainfall intensity and the
-  // upstream node are accepted here so that callers already pass them.
+  // The level and the rain act so far. Rate of rise and the upstream node are
+  // accepted here so that callers already pass them.
   if (inputs.levelCm >= levelThresholdCm(thresholds, AlertLevel::Evacuate)) {
     return AlertLevel::Evacuate;
   }
@@ -34,6 +34,10 @@ AlertLevel evaluateAlertLevel(const AlertInputs& inputs, const AlertThresholds& 
     return AlertLevel::Warning;
   }
   if (inputs.levelCm >= levelThresholdCm(thresholds, AlertLevel::Watch)) {
+    return AlertLevel::Watch;
+  }
+  // Rain alone never calls for more than Watch.
+  if (inputs.rainInWindowMm >= thresholds.watchRainMm) {
     return AlertLevel::Watch;
   }
   return AlertLevel::None;

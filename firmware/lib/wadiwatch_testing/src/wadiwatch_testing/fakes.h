@@ -1,6 +1,7 @@
 // Fake ports for running the device cores on a PC.
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -24,6 +25,34 @@ class FakeClock : public Clock {
   uint64_t nowMs_ = 0;
 };
 
+// Records sleep requests. TestSite leaves a sleeping device alone until its
+// time is up or something wakes it.
+class FakeSleepControl : public SleepControl {
+ public:
+  explicit FakeSleepControl(const Clock& clock) : clock_(clock) {}
+
+  void requestSleepMs(uint64_t durationMs) override {
+    wakeAtMs_ = clock_.nowMs() + durationMs;
+    lastRequestMs_ = durationMs;
+    ++requestCount_;
+  }
+
+  // What a wake-up interrupt does on the real device.
+  void wake() { wakeAtMs_ = 0; }
+
+  bool isAsleep() const { return clock_.nowMs() < wakeAtMs_; }
+  // When the sleep last asked for ends.
+  uint64_t wakeAtMs() const { return wakeAtMs_; }
+  size_t requestCount() const { return requestCount_; }
+  uint64_t lastRequestMs() const { return lastRequestMs_; }
+
+ private:
+  const Clock& clock_;
+  uint64_t wakeAtMs_ = 0;
+  uint64_t lastRequestMs_ = 0;
+  size_t requestCount_ = 0;
+};
+
 // Scenarios speak in water level; the fake reports the distance a real sensor would see.
 class FakeLevelSensor : public LevelSensor {
  public:
@@ -32,13 +61,56 @@ class FakeLevelSensor : public LevelSensor {
   void setWaterLevelCm(float levelCm) { waterLevelCm_ = levelCm; }
 
   bool readDistanceCm(float& distanceCm) override {
+    ++readCount_;
     distanceCm = mountingHeightCm_ - waterLevelCm_;
     return true;
   }
 
+  // How many times the device has pinged the sensor.
+  size_t readCount() const { return readCount_; }
+
  private:
   float mountingHeightCm_;
   float waterLevelCm_ = 0;
+  size_t readCount_ = 0;
+};
+
+// A tipping-bucket gauge wired to the device's wake-up pin: every tip wakes a sleeping device.
+class FakeRainGauge : public RainGauge {
+ public:
+  FakeRainGauge(float mmPerTip, FakeSleepControl& sleep) : mmPerTip_(mmPerTip), sleep_(sleep) {}
+
+  void tip(uint32_t tips = 1) {
+    if (tips == 0) return;
+    tipCount_ += tips;
+    sleep_.wake();
+  }
+
+  // Scenarios speak in millimetres of rain; the fake turns them into whole tips.
+  void rainMm(float mm) { tip(static_cast<uint32_t>(std::lround(mm / mmPerTip_))); }
+
+  uint32_t tipCount() override { return tipCount_; }
+
+ private:
+  float mmPerTip_;
+  FakeSleepControl& sleep_;
+  uint32_t tipCount_ = 0;
+};
+
+class FakeNodeHealth : public NodeHealth {
+ public:
+  void setBatteryMillivolts(uint16_t millivolts) { batteryMillivolts_ = millivolts; }
+  void setSignalStrengthDbm(int8_t dbm) { signalStrengthDbm_ = dbm; }
+  void setTamper(bool tamper) { tamper_ = tamper; }
+
+  uint16_t batteryMillivolts() override { return batteryMillivolts_; }
+  int8_t signalStrengthDbm() override { return signalStrengthDbm_; }
+  bool tamperDetected() override { return tamper_; }
+
+ private:
+  uint16_t batteryMillivolts_ = 0;
+  int8_t signalStrengthDbm_ = 0;
+  bool tamper_ = false;
 };
 
 class FakeSirenOutput : public SirenOutput {

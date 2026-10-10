@@ -13,12 +13,39 @@ class Clock {
   virtual uint64_t nowMs() const = 0;
 };
 
+// Lets a core ask for sleep once it has nothing left to do.
+class SleepControl {
+ public:
+  virtual ~SleepControl() = default;
+  // Asks to sleep for up to durationMs once the current tick returns.
+  // The device may wake sooner (a rain-gauge tip wakes the wadi node),
+  // so the next tick can come before the time is up.
+  virtual void requestSleepMs(uint64_t durationMs) = 0;
+};
+
 class LevelSensor {
  public:
   virtual ~LevelSensor() = default;
   // Distance from the sensor face down to the water surface (or the dry bed).
   // Returns false when no reading could be taken.
   virtual bool readDistanceCm(float& distanceCm) = 0;
+};
+
+class RainGauge {
+ public:
+  virtual ~RainGauge() = default;
+  // Bucket tips counted since power-on. Counting continues while the processor sleeps.
+  virtual uint32_t tipCount() = 0;
+};
+
+// The health values a node reports in its heartbeat.
+class NodeHealth {
+ public:
+  virtual ~NodeHealth() = default;
+  virtual uint16_t batteryMillivolts() = 0;
+  // Strength of the last frame the radio received.
+  virtual int8_t signalStrengthDbm() = 0;
+  virtual bool tamperDetected() = 0;
 };
 
 class Radio {

@@ -37,10 +37,31 @@ float levelWithin(const TestSite& site, AlertLevel alertLevel) {
   return (lowerCm + upperCm) / 2.0f;
 }
 
-// Holds the wadi at one level for long enough to be measured.
+// The longest the wadi node goes without measuring: one dry-mode interval.
+// In storm mode it measures sooner.
+uint64_t longestMeasureIntervalMs(const TestSite& site) {
+  return site.config.wadiNode.mode.dryMeasureIntervalMs;
+}
+
+// Holds the wadi at one level until the wadi node has measured it, whichever
+// operating mode the node is in: until its next ping of the level sensor.
 void holdLevel(TestSite& site, float levelCm) {
   site.levelSensor.setWaterLevelCm(levelCm);
-  site.runMs(site.config.wadiNode.measureIntervalMs);
+  const size_t readsBefore = site.levelSensor.readCount();
+  for (uint64_t waited = 0; site.levelSensor.readCount() == readsBefore;
+       waited += TestSite::kStepMs) {
+    TEST_ASSERT_TRUE_MESSAGE(waited < longestMeasureIntervalMs(site),
+                             "the wadi node never measured the level");
+    site.runMs(TestSite::kStepMs);
+  }
+}
+
+// The flood has passed: the wadi stays dry for long enough that the node goes
+// back to dry mode and measures the dry bed more than once there.
+void stayDryPastTheReturnToDryMode(TestSite& site) {
+  const wadiwatch::OperatingModeConfig& mode = site.config.wadiNode.mode;
+  site.levelSensor.setWaterLevelCm(0.0f);
+  site.runMs(static_cast<uint64_t>(mode.stormQuietMs) + 2ull * mode.dryMeasureIntervalMs);
 }
 
 }  // namespace
@@ -49,7 +70,8 @@ static void test_level_below_the_watch_threshold_puts_nothing_on_the_air() {
   TestSite site;
   site.levelSensor.setWaterLevelCm(thresholdCm(site, AlertLevel::Watch) / 2.0f);
 
-  site.runMinutes(30);
+  // Long enough for more than one dry-mode measurement; the first heartbeat is not due yet.
+  site.runMs(2ull * site.config.wadiNode.mode.dryMeasureIntervalMs);
 
   TEST_ASSERT_EQUAL_UINT(0, site.air.transmitted().size());
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
@@ -59,7 +81,8 @@ static void test_level_below_the_watch_threshold_puts_nothing_on_the_air() {
 static void test_slow_flood_raises_watch_then_warning_then_evacuate_at_the_configured_levels() {
   TestSite site;
   const AlertThresholds& thresholds = site.config.wadiNode.alertThresholds;
-  // The wadi rises by 1% of its bank-full depth per measurement, from a dry bed to bank-full.
+  // The wadi rises by 1% of its bank-full depth per measurement, from a dry bed to bank-full:
+  // a measurement every dry-mode interval at first, every storm-mode interval from Watch on.
   const float stepCm = thresholds.bankFullDepthCm / 100.0f;
   const int steps = 100;
 
@@ -119,8 +142,7 @@ static void test_warning_produces_the_intermittent_pattern_with_strobe() {
 
   // Run up to the moment the siren first sounds.
   for (uint64_t waited = 0; !site.siren.isOn(); waited += TestSite::kStepMs) {
-    TEST_ASSERT_TRUE_MESSAGE(waited < site.config.wadiNode.measureIntervalMs,
-                             "the siren never sounded");
+    TEST_ASSERT_TRUE_MESSAGE(waited < longestMeasureIntervalMs(site), "the siren never sounded");
     site.runMs(TestSite::kStepMs);
   }
   TEST_ASSERT_TRUE(site.siren.isStrobeOn());
@@ -176,8 +198,7 @@ static void test_falling_level_does_not_lower_evacuate() {
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
   holdLevel(site, levelWithin(site, AlertLevel::Watch));
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
-  site.levelSensor.setWaterLevelCm(0.0f);
-  site.runMinutes(60);
+  stayDryPastTheReturnToDryMode(site);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, site.latestAlertOnAir());
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
@@ -188,8 +209,7 @@ static void test_falling_level_does_not_lower_warning() {
   TestSite site;
   holdLevel(site, levelWithin(site, AlertLevel::Warning));
 
-  site.levelSensor.setWaterLevelCm(0.0f);
-  site.runMinutes(60);
+  stayDryPastTheReturnToDryMode(site);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, site.latestAlertOnAir());
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
