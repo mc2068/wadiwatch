@@ -10,6 +10,7 @@ Solar-powered wadi nodes measure water level and rainfall, decide the alert leve
 |---|---|
 | `CONTEXT.md` | Project vocabulary and fixed constraints |
 | `docs/adr/` | Design decisions and their reasons |
+| `firmware/` | Wadi node and siren node firmware, with tests that run on a PC |
 | `report/NEXUS_Phase1_Report.docx` | Phase 1 report (editable) |
 | `report/NEXUS_Phase1_Report_preview.pdf` | Same content rendered to PDF |
 | `report/video_script.md` | 2-minute video pitch script |
@@ -29,4 +30,36 @@ node build.js
 
 `node build.js` writes the `.docx` and `out/preview.html`. Print the HTML to PDF from Chrome (A4, no headers and footers) to refresh the preview PDF.
 
-Firmware, hardware and dashboard code will be added here during the prototype phase.
+## Firmware
+
+The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
+
+Setup, once:
+
+```bash
+pip install platformio
+```
+
+The PC tests need a C++ compiler (`g++`) on the PATH. On Windows:
+
+```bash
+winget install -e --id BrechtSanders.WinLibs.POSIX.UCRT
+```
+
+Run the tests:
+
+```bash
+cd firmware
+pio test -e native
+```
+
+Build the wadi node and siren node firmware for the ESP32:
+
+```bash
+cd firmware
+pio run
+```
+
+If `pio` is not on the PATH, use `python -m platformio` in its place. The board is set in `firmware/platformio.ini`; node identifiers and thresholds are set only in the site configuration inside the `wadiwatch` library.
+
+The hardware adapters (sensor, LoRa radio, siren driver) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway and dashboard will be added during the prototype phase.
