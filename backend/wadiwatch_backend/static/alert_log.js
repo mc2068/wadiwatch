@@ -183,6 +183,12 @@
 
   // The request that stays on screen at Evacuate
 
+  // The request sticks to the top of the window. A link into the page (a node
+  // flag jumping to the node health section) must land below it, not under it.
+  function keepLinksBelowRequests() {
+    document.documentElement.style.scrollPaddingTop = `${requests.offsetHeight}px`;
+  }
+
   function showRequests(waiting) {
     requests.hidden = waiting.length === 0;
     requests.replaceChildren(...waiting.map((entry) => {
@@ -200,6 +206,7 @@
     document.title = waiting.length === 0
       ? pageTitle
       : `Acknowledge ${LEVEL_LABELS[waiting[0].alert_level]}: ${pageTitle}`;
+    keepLinksBelowRequests();
   }
 
   // Alert log
@@ -319,6 +326,8 @@
     setTimeout(poll, POLL_MS);
   }
 
+  // Its text wraps differently, so its height changes, when the window does.
+  window.addEventListener("resize", keepLinksBelowRequests);
   signInOpen.addEventListener("click", () => openSignIn());
   signOutButton.addEventListener("click", signOut);
   form.addEventListener("submit", signIn);
