@@ -27,9 +27,20 @@ class SleepControl {
 class LevelSensor {
  public:
   virtual ~LevelSensor() = default;
-  // Distance from the sensor face down to the water surface (or the dry bed).
+  // One ultrasonic ping: the distance from the sensor face down to whatever
+  // returned the echo, normally the water surface (or the dry bed). Unfiltered:
+  // the core takes several pings per measurement and filters them itself.
   // Returns false when no reading could be taken.
   virtual bool readDistanceCm(float& distanceCm) = 0;
+};
+
+// The air temperature at the level sensor, used to correct the speed of sound.
+// Optional hardware: a wadi node without it measures the level uncorrected.
+class TemperatureSensor {
+ public:
+  virtual ~TemperatureSensor() = default;
+  // Returns false when no trustworthy reading could be taken.
+  virtual bool readTemperatureC(float& temperatureC) = 0;
 };
 
 class RainGauge {
@@ -93,5 +104,15 @@ enum class StorageRecord : uint16_t {
 inline uint32_t storageKey(StorageRecord record, uint16_t index) {
   return (static_cast<uint32_t>(record) << 16) | index;
 }
+
+// The gateway's GSM modem, as far as SMS go.
+class GsmModem {
+ public:
+  virtual ~GsmModem() = default;
+  // Sends one SMS to one phone number. The number is in international format
+  // (+216...) and the text is UTF-8; both end with a zero byte. Returns false
+  // when the SMS could not be handed to the mobile network.
+  virtual bool sendSms(const char* phoneNumber, const char* text) = 0;
+};
 
 }  // namespace wadiwatch

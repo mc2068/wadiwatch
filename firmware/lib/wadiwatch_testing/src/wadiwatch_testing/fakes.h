@@ -8,8 +8,10 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "wadiwatch/level_measurement.h"
 #include "wadiwatch/ports.h"
 
 namespace wadiwatch {
@@ -55,15 +57,55 @@ class FakeSleepControl : public SleepControl {
 };
 
 // Scenarios speak in water level; the fake reports the distance a real sensor would see.
+// Every call is one ping. Pings see the water unless a scenario scripts something else
+// for them: debris or spray in the beam, a reading no wadi could give, no echo at all.
 class FakeLevelSensor : public LevelSensor {
  public:
-  explicit FakeLevelSensor(float mountingHeightCm) : mountingHeightCm_(mountingHeightCm) {}
+  // `referenceTemperatureC` is the air temperature the sensor works out its distances for.
+  FakeLevelSensor(float mountingHeightCm, float referenceTemperatureC)
+      : mountingHeightCm_(mountingHeightCm),
+        referenceTemperatureC_(referenceTemperatureC),
+        airTemperatureC_(referenceTemperatureC) {}
 
   void setWaterLevelCm(float levelCm) { waterLevelCm_ = levelCm; }
 
+  // The air over the wadi. The sensor times its echo and knows nothing of the air:
+  // in warmer air sound is faster, the echo is back sooner, and the sensor reports
+  // the water nearer than it is. Until this is called the air is at the sensor's
+  // reference temperature and the reported distances are exact.
+  void setAirTemperatureC(float temperatureC) { airTemperatureC_ = temperatureC; }
+
+  // The next ping not yet scripted is returned by something at this height above
+  // the bed instead of by the water. Scripted pings are used up one per ping, in order.
+  void scriptPingLevelCm(float levelCm) {
+    script_.push_back({ScriptedPing::Echo, reported(mountingHeightCm_ - levelCm)});
+  }
+
+  // The next ping not yet scripted makes the sensor report exactly this distance,
+  // whatever is in front of it.
+  void scriptPingDistanceCm(float distanceCm) {
+    script_.push_back({ScriptedPing::Echo, distanceCm});
+  }
+
+  // The next ping not yet scripted gets no echo: the sensor has no reading.
+  void scriptPingWithoutEcho() { script_.push_back({ScriptedPing::NoEcho, 0.0f}); }
+
+  // From now on no ping gets an echo (a dead or unplugged sensor), or pings work again.
+  void setEchoing(bool echoing) { echoing_ = echoing; }
+
+  size_t scriptedPingsLeft() const { return script_.size(); }
+
   bool readDistanceCm(float& distanceCm) override {
     ++readCount_;
-    distanceCm = mountingHeightCm_ - waterLevelCm_;
+    if (!script_.empty()) {
+      const ScriptedPing ping = script_.front();
+      script_.pop_front();
+      if (ping.kind == ScriptedPing::NoEcho) return false;
+      distanceCm = ping.distanceCm;
+      return true;
+    }
+    if (!echoing_) return false;
+    distanceCm = reported(mountingHeightCm_ - waterLevelCm_);
     return true;
   }
 
@@ -71,9 +113,47 @@ class FakeLevelSensor : public LevelSensor {
   size_t readCount() const { return readCount_; }
 
  private:
+  struct ScriptedPing {
+    enum Kind { Echo, NoEcho };
+    Kind kind;
+    float distanceCm;
+  };
+
+  // What the sensor makes of an echo from this far away, in the air as it is.
+  float reported(float distanceCm) const {
+    if (airTemperatureC_ == referenceTemperatureC_) return distanceCm;
+    return distanceCm * speedOfSoundMps(referenceTemperatureC_) / speedOfSoundMps(airTemperatureC_);
+  }
+
   float mountingHeightCm_;
+  float referenceTemperatureC_;
+  float airTemperatureC_;
   float waterLevelCm_ = 0;
+  bool echoing_ = true;
+  std::deque<ScriptedPing> script_;
   size_t readCount_ = 0;
+};
+
+// The thermometer beside the level sensor. It has no reading until a scenario gives it one.
+class FakeTemperatureSensor : public TemperatureSensor {
+ public:
+  void setTemperatureC(float temperatureC) {
+    available_ = true;
+    temperatureC_ = temperatureC;
+  }
+
+  // The thermometer stops answering.
+  void setUnavailable() { available_ = false; }
+
+  bool readTemperatureC(float& temperatureC) override {
+    if (!available_) return false;
+    temperatureC = temperatureC_;
+    return true;
+  }
+
+ private:
+  bool available_ = false;
+  float temperatureC_ = 0;
 };
 
 // A tipping-bucket gauge wired to the device's wake-up pin: every tip wakes a sleeping device.
@@ -229,6 +309,51 @@ inline void InMemoryRadio::send(const uint8_t* data, size_t length) {
   sent_.push_back(Frame(data, data + length));
   air_.transmit(sent_.back(), this);
 }
+
+struct Sms {
+  std::string phoneNumber;
+  std::string text;
+};
+
+// The mobile network as the gateway's modem sees it. Records every SMS it is
+// asked to send: those it accepted and, during an outage, those it refused.
+class FakeGsmModem : public GsmModem {
+ public:
+  bool sendSms(const char* phoneNumber, const char* text) override {
+    const Sms sms = {phoneNumber, text};
+    if (outage_ || isRejected(sms.phoneNumber)) {
+      refused_.push_back(sms);
+      return false;
+    }
+    sent_.push_back(sms);
+    return true;
+  }
+
+  // During an outage the modem has no network and refuses every SMS.
+  void startOutage() { outage_ = true; }
+  void endOutage() { outage_ = false; }
+
+  // From now on the network refuses every SMS to this number, outage or not.
+  void rejectNumber(const std::string& phoneNumber) { rejectedNumbers_.push_back(phoneNumber); }
+
+  // The SMS that went out to the network, in order.
+  const std::vector<Sms>& sent() const { return sent_; }
+  // The SMS the gateway asked for and the modem refused, in order.
+  const std::vector<Sms>& refused() const { return refused_; }
+
+ private:
+  bool isRejected(const std::string& phoneNumber) const {
+    for (const std::string& rejected : rejectedNumbers_) {
+      if (rejected == phoneNumber) return true;
+    }
+    return false;
+  }
+
+  bool outage_ = false;
+  std::vector<std::string> rejectedNumbers_;
+  std::vector<Sms> sent_;
+  std::vector<Sms> refused_;
+};
 
 }  // namespace testing
 }  // namespace wadiwatch

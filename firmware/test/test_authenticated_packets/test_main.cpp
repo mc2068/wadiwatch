@@ -82,7 +82,8 @@ static void test_genuine_alert_altered_in_transit_does_not_sound_the_siren() {
   TestSite source;
   floodWadi(source);
   TEST_ASSERT_TRUE(sirenSounds(source));
-  const Frame genuine = source.air.transmitted().back();
+  // The node goes on sending readings; the frame to tamper with is its alert.
+  const Frame genuine = source.framesOnAir(PacketKind::Alert).back();
 
   // The same site with a dry wadi: its siren node has not heard this alert yet.
   TestSite site;
@@ -110,7 +111,7 @@ static void test_replayed_alert_does_not_sound_the_siren() {
   // A genuine alert, recorded off the air during a flood.
   TestSite source;
   floodWadi(source);
-  const Frame recorded = source.air.transmitted().back();
+  const Frame recorded = source.framesOnAir(PacketKind::Alert).back();
 
   // The same site with a dry wadi, so that no wadi node is sending its alert again:
   // the siren node hears the recorded alert once, as it did during the flood.

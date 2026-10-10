@@ -186,6 +186,18 @@ uint64_t stepsListening(TestSite& site, const Node& node, uint64_t steps) {
   return listening;
 }
 
+// In how many of the next `steps` simulation steps the node pings its level sensor:
+// how many measurements it takes, a measurement being several pings in one go.
+uint64_t stepsWithAMeasurement(TestSite& site, const Node& node, uint64_t steps) {
+  uint64_t measurements = 0;
+  for (uint64_t step = 0; step < steps; ++step) {
+    const size_t readsBefore = node.levelSensor.readCount();
+    site.runMs(kStepMs);
+    if (node.levelSensor.readCount() > readsBefore) ++measurements;
+  }
+  return measurements;
+}
+
 // Time on air, in microseconds, of the frames a radio sent from the `firstFrame`-th on.
 uint64_t timeOnAirUs(const TestSite& site, const InMemoryRadio& radio, size_t firstFrame) {
   uint64_t totalUs = 0;
@@ -548,11 +560,9 @@ static void test_a_node_at_warning_stays_in_storm_mode_after_the_level_has_falle
   site.runMs(static_cast<uint64_t>(mode.stormQuietMs) + 2ull * mode.dryMeasureIntervalMs);
 
   // It still measures every storm-mode interval and still sends its alert again.
-  const size_t readsBefore = node.levelSensor.readCount();
   const size_t alertsBefore = alertsFrom(site, node).size();
-  site.runMs(mode.dryMeasureIntervalMs);
-  TEST_ASSERT_EQUAL_UINT(mode.dryMeasureIntervalMs / mode.stormMeasureIntervalMs,
-                         node.levelSensor.readCount() - readsBefore);
+  TEST_ASSERT_EQUAL_UINT64(mode.dryMeasureIntervalMs / mode.stormMeasureIntervalMs,
+                           stepsWithAMeasurement(site, node, mode.dryMeasureIntervalMs / kStepMs));
   TEST_ASSERT_EQUAL_UINT(mode.dryMeasureIntervalMs / node.config.alertResendIntervalMs,
                          alertsFrom(site, node).size() - alertsBefore);
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, node));
@@ -628,7 +638,7 @@ static void test_the_downstream_node_sleeps_from_the_end_of_its_receive_window_t
   downstream.rainGauge.tip();
   site.runMs(kStepMs);
   const uint64_t measuredAtMs = site.clock.nowMs();
-  TEST_ASSERT_EQUAL_UINT(1, downstream.levelSensor.readCount());
+  TEST_ASSERT_TRUE(downstream.levelSensor.readCount() > 0);
 
   site.runMs(downstream.config.upstream.receiveWindowMs);
 

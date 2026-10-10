@@ -6,7 +6,9 @@
 #include <vector>
 
 #include "wadiwatch_testing/fakes.h"
+#include "wadiwatch/gateway.h"
 #include "wadiwatch/packet.h"
+#include "wadiwatch/recipients.h"
 #include "wadiwatch/siren_node.h"
 #include "wadiwatch/site_config.h"
 #include "wadiwatch/wadi_node.h"
@@ -29,7 +31,8 @@ class WadiNodeRig {
       : config_(config), auth_(auth), clock_(clock), radio(air.join(&sleep)) {}
 
   FakeSleepControl sleep{clock_};
-  FakeLevelSensor levelSensor{config_.mountingHeightCm};
+  FakeLevelSensor levelSensor{config_.mountingHeightCm, config_.levelSensor.referenceTemperatureC};
+  FakeTemperatureSensor temperatureSensor;
   FakeRainGauge rainGauge{config_.rain.mmPerTip, sleep};
   FakeNodeHealth health;
   FakeStorage storage;
@@ -45,7 +48,8 @@ class WadiNodeRig {
  private:
   std::unique_ptr<WadiNode> makeNode() {
     return std::unique_ptr<WadiNode>(new WadiNode(config_, auth_, clock_, sleep, levelSensor,
-                                                  rainGauge, health, radio, storage));
+                                                  rainGauge, health, radio, storage,
+                                                  &temperatureSensor));
   }
 };
 
@@ -59,22 +63,32 @@ struct TestSite {
   // The first wadi node, `config.wadiNode`: the upstream one unless a scenario
   // configures the site otherwise.
   FakeSleepControl wadiNodeSleep{clock};
-  FakeLevelSensor levelSensor{config.wadiNode.mountingHeightCm};
+  FakeLevelSensor levelSensor{config.wadiNode.mountingHeightCm,
+                              config.wadiNode.levelSensor.referenceTemperatureC};
+  FakeTemperatureSensor temperatureSensor;
   FakeRainGauge rainGauge{config.wadiNode.rain.mmPerTip, wadiNodeSleep};
   FakeNodeHealth wadiNodeHealth;
   FakeSirenOutput siren;
   FakeStorage wadiNodeStorage;
   FakeStorage sirenNodeStorage;
+  FakeStorage gatewayStorage;
   InMemoryRadio& wadiNodeRadio = air.join(&wadiNodeSleep);
   InMemoryRadio& sirenNodeRadio = air.join();
+  InMemoryRadio& gatewayRadio = air.join();
+  // The recipient list entered on the gateway.
+  RecipientList recipients;
+  FakeGsmModem modem;
   std::unique_ptr<WadiNode> wadiNode = makeWadiNode();
   // The second wadi node, `config.downstreamWadiNode`, with its own sensors:
   // `downstream.levelSensor`, `downstream.rainGauge`, `downstream.node` and so on.
   WadiNodeRig downstream{config.downstreamWadiNode, config.auth, clock, air};
   std::unique_ptr<SirenNode> sirenNode = makeSirenNode();
+  std::unique_ptr<Gateway> gateway = makeGateway();
 
   TestSite() : TestSite(prototypeSite()) {}
-  explicit TestSite(const SiteConfig& siteConfig) : config(siteConfig) {}
+  explicit TestSite(const SiteConfig& siteConfig) : TestSite(siteConfig, prototypeRecipients()) {}
+  TestSite(const SiteConfig& siteConfig, const RecipientList& recipientList)
+      : config(siteConfig), recipients(recipientList) {}
 
   // Advances simulated time one step at a time, ticking every device that is awake.
   // A wadi node sleeps between pieces of work; a tip of its rain gauge wakes it
@@ -85,8 +99,13 @@ struct TestSite {
       if (!wadiNodeSleep.isAsleep()) wadiNode->tick();
       if (!downstream.sleep.isAsleep()) downstream.node->tick();
       sirenNode->tick();
+      if (gatewayPluggedIn_) gateway->tick();
     }
   }
+
+  // Takes the gateway out of the site, as if it had lost power: from now on it
+  // hears nothing and sends nothing.
+  void unplugGateway() { gatewayPluggedIn_ = false; }
 
   void runMinutes(uint64_t minutes) { runMs(minutes * 60 * 1000); }
 
@@ -122,6 +141,22 @@ struct TestSite {
       if (packet.sender == sender) packets.push_back(packet);
     }
     return packets;
+  }
+
+  // The frames behind packetsOnAir(kind), byte for byte as they were transmitted:
+  // what a third radio listening in would have recorded. For scenarios that
+  // alter or replay a genuine frame.
+  std::vector<Frame> framesOnAir(PacketKind kind) const {
+    FakeStorage listenerStorage;
+    PacketCodec listener(config.auth, nodeIdOutsideSite(), listenerStorage);
+    std::vector<Frame> frames;
+    for (const Frame& frame : air.transmitted()) {
+      Packet packet;
+      if (listener.decode(frame.data(), frame.size(), packet) && packet.kind == kind) {
+        frames.push_back(frame);
+      }
+    }
+    return frames;
   }
 
   // The alert level carried by the most recent alert packet put on the air,
@@ -179,17 +214,28 @@ struct TestSite {
     sirenNode = makeSirenNode();
   }
 
+  // The gateway forgets the events in progress; the modem and what it has
+  // already sent are untouched.
+  void restartGateway() { gateway = makeGateway(); }
+
  private:
   std::unique_ptr<WadiNode> makeWadiNode() {
     return std::unique_ptr<WadiNode>(
         new WadiNode(config.wadiNode, config.auth, clock, wadiNodeSleep, levelSensor, rainGauge,
-                     wadiNodeHealth, wadiNodeRadio, wadiNodeStorage));
+                     wadiNodeHealth, wadiNodeRadio, wadiNodeStorage, &temperatureSensor));
   }
 
   std::unique_ptr<SirenNode> makeSirenNode() {
     return std::unique_ptr<SirenNode>(new SirenNode(config.sirenNode, config.auth, clock,
                                                     sirenNodeRadio, siren, sirenNodeStorage));
   }
+
+  std::unique_ptr<Gateway> makeGateway() {
+    return std::unique_ptr<Gateway>(new Gateway(config.gateway, config.auth, recipients, clock,
+                                                gatewayRadio, modem, gatewayStorage));
+  }
+
+  bool gatewayPluggedIn_ = true;
 };
 
 }  // namespace testing

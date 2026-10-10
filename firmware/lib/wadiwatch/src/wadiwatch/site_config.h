@@ -2,13 +2,16 @@
 // thresholds, radio settings and the site key are set.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "wadiwatch/alert_engine.h"
+#include "wadiwatch/level_measurement.h"
 #include "wadiwatch/operating_mode.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/radio_config.h"
 #include "wadiwatch/rain_window.h"
+#include "wadiwatch/rate_of_rise.h"
 #include "wadiwatch/upstream_link.h"
 
 namespace wadiwatch {
@@ -17,11 +20,14 @@ struct WadiNodeConfig {
   NodeId id;
   // Height of the sensor face above the wadi bed.
   float mountingHeightCm;
+  // Which readings of the level sensor are physically possible at this node.
+  LevelSensorConfig levelSensor;
   // Everything the alert engine compares against. The Watch level threshold is
   // also the level at or above which the node is in storm mode.
   AlertThresholds alertThresholds;
   OperatingModeConfig mode;
   RainConfig rain;
+  RateOfRiseConfig rateOfRise;
   uint32_t heartbeatIntervalMs;
   // Which wadi node is upstream of this one, and how long this one listens for it.
   UpstreamConfig upstream;
@@ -36,6 +42,36 @@ struct SirenNodeConfig {
   uint32_t intermittentOffMs;
 };
 
+// Identifies a wadi within the site. Wadi nodes are mounted over a wadi,
+// recipients register near one, and SMS name it.
+using WadiId = uint8_t;
+
+constexpr size_t kMaxWadis = 4;
+constexpr size_t kMaxWadiNodesPerWadi = 4;
+
+struct WadiConfig {
+  WadiId id;
+  // The wadi's name as SMS give it, in each language (UTF-8).
+  const char* nameArabic;
+  const char* nameFrench;
+  // The wadi nodes mounted over this wadi. The gateway acts on alerts from
+  // these wadi nodes only.
+  NodeId wadiNodes[kMaxWadiNodesPerWadi];
+  uint8_t wadiNodeCount;
+};
+
+// The recipient list is not part of this: it stays on the gateway (recipients.h).
+struct GatewayConfig {
+  // The gateway is a node of the site: it needs an identifier to keep its own
+  // packet counters, and to sign what it sends.
+  NodeId id;
+  WadiConfig wadis[kMaxWadis];
+  uint8_t wadiCount;
+  // After the GSM modem fails to send an SMS, the gateway waits this long
+  // before it asks the modem again.
+  uint32_t smsRetryIntervalMs;
+};
+
 struct SiteConfig {
   // The site's two wadi nodes. Which one is upstream of the other is decided by
   // `WadiNodeConfig::upstream`, not by these names: in the prototype the first has no
@@ -43,6 +79,7 @@ struct SiteConfig {
   WadiNodeConfig wadiNode;
   WadiNodeConfig downstreamWadiNode;
   SirenNodeConfig sirenNode;
+  GatewayConfig gateway;
   // The shared key and the nodes that packets are accepted from.
   SiteAuth auth;
   RadioConfig radio;

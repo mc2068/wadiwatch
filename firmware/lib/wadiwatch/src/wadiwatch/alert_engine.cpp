@@ -28,12 +28,15 @@ namespace {
 
 // What the node's own readings call for, whatever its upstream node says.
 AlertLevel alertLevelFromReadings(const AlertInputs& inputs, const AlertThresholds& thresholds) {
-  // The level and the rain act so far. The rate of rise is accepted here so
-  // that callers already pass it.
   if (inputs.levelCm >= levelThresholdCm(thresholds, AlertLevel::Evacuate)) {
     return AlertLevel::Evacuate;
   }
   if (inputs.levelCm >= levelThresholdCm(thresholds, AlertLevel::Warning)) {
+    return AlertLevel::Warning;
+  }
+  // A fast sustained rise is the earliest sign of a flash flood: it calls for
+  // Warning however low the level still is, and never for more on its own.
+  if (inputs.sustainedRateOfRiseCmPerMin >= thresholds.warningRateOfRiseCmPerMin) {
     return AlertLevel::Warning;
   }
   if (inputs.levelCm >= levelThresholdCm(thresholds, AlertLevel::Watch)) {

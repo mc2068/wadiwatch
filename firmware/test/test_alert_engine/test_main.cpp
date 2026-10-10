@@ -43,6 +43,63 @@ struct RainRow {
   AlertLevel expected;
 };
 
+// What a sustained rate of rise calls for, on its own and together with the level and the rain.
+struct RiseRow {
+  const char* description;
+  float levelCm;
+  float sustainedRateOfRiseCmPerMin;
+  float rainInWindowMm;
+  AlertLevel expected;
+};
+
+// Slower than any rise the level sensor could tell apart.
+const float kJustCmPerMin = 0.01f;
+
+std::vector<RiseRow> riseRows(const AlertThresholds& thresholds) {
+  const float watchCm = levelThresholdCm(thresholds, AlertLevel::Watch);
+  const float warningCm = levelThresholdCm(thresholds, AlertLevel::Warning);
+  const float evacuateCm = levelThresholdCm(thresholds, AlertLevel::Evacuate);
+  const float warningRate = thresholds.warningRateOfRiseCmPerMin;
+  const float watchMm = thresholds.watchRainMm;
+  return {
+      {"a rise just short of Warning on a dry bed", 0.0f, warningRate - kJustCmPerMin, 0.0f,
+       AlertLevel::None},
+      {"exactly the Warning rate of rise on a dry bed", 0.0f, warningRate, 0.0f,
+       AlertLevel::Warning},
+      {"a rise just over Warning on a dry bed", 0.0f, warningRate + kJustCmPerMin, 0.0f,
+       AlertLevel::Warning},
+      {"a wall of water on a dry bed is still only Warning", 0.0f, warningRate * 10.0f, 0.0f,
+       AlertLevel::Warning},
+      {"a falling level on a dry bed", 0.0f, -warningRate, 0.0f, AlertLevel::None},
+      {"a rise short of Warning, level at Watch", watchCm, warningRate - kJustCmPerMin, 0.0f,
+       AlertLevel::Watch},
+      {"the Warning rate of rise, level just below Watch", watchCm - kJustCm, warningRate, 0.0f,
+       AlertLevel::Warning},
+      {"the Warning rate of rise, level at Watch", watchCm, warningRate, 0.0f,
+       AlertLevel::Warning},
+      {"the Warning rate of rise, level at Warning", warningCm, warningRate, 0.0f,
+       AlertLevel::Warning},
+      {"the Warning rate of rise does not hold back Evacuate", evacuateCm, warningRate, 0.0f,
+       AlertLevel::Evacuate},
+      {"a falling level does not hold back Warning", warningCm, -warningRate, 0.0f,
+       AlertLevel::Warning},
+      {"a rise short of Warning with Watch rain", 0.0f, warningRate - kJustCmPerMin, watchMm,
+       AlertLevel::Watch},
+      {"the Warning rate of rise with Watch rain", 0.0f, warningRate, watchMm,
+       AlertLevel::Warning},
+  };
+}
+
+void assertRise(const AlertThresholds& thresholds) {
+  for (const RiseRow& row : riseRows(thresholds)) {
+    const AlertInputs inputs = {row.levelCm, row.sustainedRateOfRiseCmPerMin, row.rainInWindowMm,
+                                AlertLevel::None, AlertLevel::None};
+    const AlertLevel actual = evaluateAlertLevel(inputs, thresholds);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(row.expected),
+                                    static_cast<uint8_t>(actual), row.description);
+  }
+}
+
 // No rise, nothing heard from upstream and no alert yet.
 AlertInputs levelAndRain(float levelCm, float rainInWindowMm) {
   const AlertInputs inputs = {levelCm, 0.0f, rainInWindowMm, AlertLevel::None, AlertLevel::None};
@@ -178,6 +235,8 @@ AlertThresholds shallowCulvert() {
       /* evacuateLevelPercent */ 90.0f,
       /* watchRainMm */ 6.0f,
       /* watchRainWindowMs */ 20u * 60u * 1000u,
+      /* warningRateOfRiseCmPerMin */ 3.0f,
+      /* warningRateOfRiseSustainMs */ 4u * 60u * 1000u,
   };
   return thresholds;
 }
@@ -208,12 +267,38 @@ static void test_rain_in_the_window_raises_watch_at_another_site() {
   assertRain(shallowCulvert());
 }
 
+static void test_a_sustained_rate_of_rise_raises_warning_at_the_prototype_site() {
+  assertRise(wadiwatch::prototypeSite().wadiNode.alertThresholds);
+}
+
+static void test_a_sustained_rate_of_rise_raises_warning_at_another_site() {
+  assertRise(shallowCulvert());
+}
+
 static void test_warning_here_and_upstream_calls_for_evacuate_at_the_prototype_site() {
   assertUpstream(wadiwatch::prototypeSite().wadiNode.alertThresholds);
 }
 
 static void test_warning_here_and_upstream_calls_for_evacuate_at_another_site() {
   assertUpstream(shallowCulvert());
+}
+
+static void test_warning_by_rate_of_rise_is_confirmed_by_the_upstream_node_like_any_other() {
+  const AlertThresholds thresholds = shallowCulvert();
+  const float warningRate = thresholds.warningRateOfRiseCmPerMin;
+  // A fast rise on a low level, with Warning heard from upstream.
+  const AlertInputs rising = {0.0f, warningRate, 0.0f, AlertLevel::Warning, AlertLevel::None};
+  // The rise has stopped, the Warning it raised is still in force.
+  const AlertInputs risen = {0.0f, 0.0f, 0.0f, AlertLevel::Warning, AlertLevel::Warning};
+  const AlertInputs slowRise = {0.0f, warningRate - kJustCmPerMin, 0.0f, AlertLevel::Warning,
+                                AlertLevel::None};
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AlertLevel::Evacuate),
+                          static_cast<uint8_t>(evaluateAlertLevel(rising, thresholds)));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AlertLevel::Evacuate),
+                          static_cast<uint8_t>(evaluateAlertLevel(risen, thresholds)));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AlertLevel::None),
+                          static_cast<uint8_t>(evaluateAlertLevel(slowRise, thresholds)));
 }
 
 int main(int, char**) {
@@ -223,7 +308,10 @@ int main(int, char**) {
   RUN_TEST(test_alert_level_at_each_threshold_boundary_of_another_site);
   RUN_TEST(test_rain_in_the_window_raises_watch_at_the_prototype_site);
   RUN_TEST(test_rain_in_the_window_raises_watch_at_another_site);
+  RUN_TEST(test_a_sustained_rate_of_rise_raises_warning_at_the_prototype_site);
+  RUN_TEST(test_a_sustained_rate_of_rise_raises_warning_at_another_site);
   RUN_TEST(test_warning_here_and_upstream_calls_for_evacuate_at_the_prototype_site);
   RUN_TEST(test_warning_here_and_upstream_calls_for_evacuate_at_another_site);
+  RUN_TEST(test_warning_by_rate_of_rise_is_confirmed_by_the_upstream_node_like_any_other);
   return UNITY_END();
 }

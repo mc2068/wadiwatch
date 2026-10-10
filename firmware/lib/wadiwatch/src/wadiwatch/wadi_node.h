@@ -7,6 +7,7 @@
 #include "wadiwatch/packet.h"
 #include "wadiwatch/ports.h"
 #include "wadiwatch/rain_window.h"
+#include "wadiwatch/rate_of_rise.h"
 #include "wadiwatch/site_config.h"
 #include "wadiwatch/upstream_link.h"
 
@@ -22,7 +23,9 @@ class WadiNode {
            RainGauge& rainGauge,
            NodeHealth& health,
            Radio& radio,
-           PersistentStorage& storage);
+           PersistentStorage& storage,
+           // Optional hardware: without it the level is not corrected for temperature.
+           TemperatureSensor* temperature = nullptr);
 
   // Call whenever the device is awake. Does whatever is due (counting rain,
   // measuring, listening for the upstream node, sending an alert or a heartbeat),
@@ -40,6 +43,7 @@ class WadiNode {
   void resendAlert(uint64_t nowMs);
   void switchReceiver(uint64_t nowMs);
   void sendAlert();
+  void sendReading(uint64_t nowMs);
   void sendHeartbeat();
   void send(Packet& packet);
   void sleepUntilNextDue(uint64_t nowMs);
@@ -51,9 +55,11 @@ class WadiNode {
   RainGauge& rainGauge_;
   NodeHealth& health_;
   Radio& radio_;
+  TemperatureSensor* temperature_;
   PacketCodec codec_;
   ModeController mode_;
   RainWindow rain_;
+  RateOfRise rise_;
   UpstreamLink upstream_;
   bool receiverOn_ = false;
   uint64_t nextAlertResendAtMs_ = 0;
@@ -63,6 +69,10 @@ class WadiNode {
   uint32_t tipsCounted_ = 0;
   bool hasLevel_ = false;
   float levelCm_ = 0;
+  // A storm-mode measurement has been taken and not yet sent as a reading.
+  bool readingDue_ = false;
+  // Pings discarded since the last heartbeat. Stops counting at its largest value.
+  uint8_t discardedReadings_ = 0;
   AlertLevel alertLevel_ = AlertLevel::None;
 };
 

@@ -37,9 +37,13 @@ static_assert(sizeof(kSiteKey) == kSiteKeySize, "the site key must be exactly kS
 const NodeId kWadiNodeId = 0x0101;
 const NodeId kDownstreamWadiNodeId = 0x0102;
 const NodeId kSirenNodeId = 0x0201;
+// The backend knows the gateway by this identifier too (backend/site/prototype.json).
+const NodeId kGatewayNodeId = 0x0301;
+// The one wadi of the bench prototype.
+const WadiId kWadi = 1;
 
 // Every node of the site. Packets from any other sender are ignored.
-const NodeId kSiteNodes[] = {kWadiNodeId, kDownstreamWadiNodeId, kSirenNodeId};
+const NodeId kSiteNodes[] = {kWadiNodeId, kDownstreamWadiNodeId, kSirenNodeId, kGatewayNodeId};
 const size_t kSiteNodeCount = sizeof(kSiteNodes) / sizeof(kSiteNodes[0]);
 static_assert(kSiteNodeCount <= kMaxSiteNodes, "too many nodes for one site");
 
@@ -48,6 +52,13 @@ SiteConfig makePrototypeSite() {
       /* wadiNode */ {
           /* id */ kWadiNodeId,
           /* mountingHeightCm */ 300.0f,
+          /* levelSensor */ {
+              /* minDistanceCm */ 25.0f,
+              // Without a temperature reading, air at -10 C makes the dry bed read
+              // 17 cm low over this mounting height.
+              /* bedToleranceCm */ 20.0f,
+              /* referenceTemperatureC */ 20.0f,
+          },
           /* alertThresholds */ {
               /* bankFullDepthCm */ 200.0f,
               /* watchLevelPercent */ 30.0f,
@@ -55,6 +66,8 @@ SiteConfig makePrototypeSite() {
               /* evacuateLevelPercent */ 75.0f,
               /* watchRainMm */ 10.0f,
               /* watchRainWindowMs */ 30u * kMinuteMs,
+              /* warningRateOfRiseCmPerMin */ 5.0f,
+              /* warningRateOfRiseSustainMs */ 3u * kMinuteMs,
           },
           /* mode */ {
               /* dryMeasureIntervalMs */ 15u * kMinuteMs,
@@ -63,6 +76,9 @@ SiteConfig makePrototypeSite() {
           },
           /* rain */ {
               /* mmPerTip */ 0.2f,
+          },
+          /* rateOfRise */ {
+              /* windowMs */ 5u * kMinuteMs,
           },
           /* heartbeatIntervalMs */ 60u * kMinuteMs,
           /* upstream */ {
@@ -76,6 +92,20 @@ SiteConfig makePrototypeSite() {
           /* id */ kSirenNodeId,
           /* intermittentOnMs */ 2000u,
           /* intermittentOffMs */ 2000u,
+      },
+      /* gateway */ {
+          /* id */ kGatewayNodeId,
+          /* wadis */ {
+              {
+                  /* id */ kWadi,
+                  /* nameArabic */ "وادي تجريبي",
+                  /* nameFrench */ "Oued Démo",
+                  /* wadiNodes */ {kWadiNodeId},
+                  /* wadiNodeCount */ 1,
+              },
+          },
+          /* wadiCount */ 1,
+          /* smsRetryIntervalMs */ 30u * 1000u,
       },
       /* auth */ {},
       // A 24-byte packet takes 113 ms on the air with these settings. In storm mode at
