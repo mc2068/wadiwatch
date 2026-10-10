@@ -72,7 +72,7 @@ The gateway sends SMS to the registered recipients, for alerts it accepts by the
 
 ## Backend and dashboard
 
-The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests and the replay tool feed messages in.
+The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level, the water level and rate-of-rise curves of each wadi node, node health, and the age of the gateway's latest data. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests and the replay tool feed messages in.
 
 Setup, once (Python 3.10 or later):
 
@@ -115,6 +115,16 @@ The scenario (`backend/scenarios/flood_demo.jsonl`) is synthetic until there is 
 Settings are environment variables, listed in `backend/wadiwatch_backend/__main__.py`. Two matter most:
 
 - `WADIWATCH_MQTT_HOST`: the MQTT broker to read gateway messages from (topic `wadiwatch/up`). Without it the backend is fed only through `POST /api/ingest`, which is what the replay tool uses.
-- `WADIWATCH_SITE`: the site file with the nodes' identifiers, names and map positions. The default, `backend/site/prototype.json`, uses placeholder positions in the Nabeul area, not surveyed locations.
+- `WADIWATCH_SITE`: the site file with the nodes' identifiers, names and map positions, and the intervals below. The default, `backend/site/prototype.json`, uses placeholder positions in the Nabeul area, not surveyed locations.
+
+What the dashboard says about health and staleness follows from three intervals in the site file, which must agree with the firmware site configuration:
+
+| Setting | Meaning | Used for |
+|---|---|---|
+| `heartbeat_interval_s` | How often every node sends a heartbeat | A node is shown as faulty when its heartbeat has been missing for more than two intervals |
+| `dry_mode_interval_s` | How often a wadi node measures in dry mode | The data is shown as stale when the gateway has delivered nothing for more than two intervals |
+| `alert_refresh_interval_s` | How often a wadi node at Warning or Evacuate repeats its alert | While any wadi node is at Warning or Evacuate, two of these intervals of silence already make the data stale |
+
+Low-battery and tamper flags come straight from each node's latest heartbeat. The API behind these panels is `GET /api/health` and `GET /api/nodes/<id>/readings?from=<unix seconds>&to=<unix seconds>` (the last day if no period is given).
 
 The ingest endpoint is not authenticated. The backend listens on the local machine only unless `WADIWATCH_HOST` says otherwise; do not expose it to a network as it is.

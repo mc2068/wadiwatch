@@ -1,0 +1,253 @@
+/* Curves, node health and the stale-data warning. Loaded after dashboard.css
+   and built on its variables. */
+
+:root {
+  /* A fault of the system (a silent gateway, a dead node, a low battery) is
+     never one of the alert level colours: violet means "the equipment", the
+     alert level colours mean "the wadi". */
+  --fault: #6a2c91;
+  --fault-soft: #f3eaf8;
+  --fault-line: #cfb3e0;
+
+  --curve: #2f6f9f;
+  --grid: #e3e8eb;
+  --grid-zero: #9aa6ae;
+}
+
+/* The page scrolls: the map and the node list keep the first screen, the
+   curves and node health follow below. (dashboard.css fills the window with
+   the map; these three rules are the only ones here that change it.) */
+html, body { height: auto; }
+body { min-height: 100vh; }
+.layout { flex: none; height: clamp(380px, 64vh, 760px); }
+
+/* Gateway status: a quiet line while data is current, a warning when it is not. */
+
+.gateway-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: var(--card);
+}
+.gateway-status__age { margin-right: auto; }
+.gateway-status__age::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--silent);
+}
+.gateway-status--fresh .gateway-status__age::before { background: var(--curve); }
+
+.gateway-status--stale {
+  padding: 12px 18px;
+  border-bottom: 0;
+  font-size: 15px;
+  color: #fff;
+  background: var(--fault);
+}
+.gateway-status--stale .gateway-status__age::before { content: none; }
+.gateway-status__title {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 2px 9px;
+  border-radius: 3px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fault);
+  background: #fff;
+}
+
+.gateway-status__title[hidden] { display: none; }
+
+.gateway-status__announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* While the data is stale, the summary in the top bar is the last known one. */
+body.stale .summary:not(.summary--unknown) { opacity: 0.6; }
+body.stale .summary:not(.summary--unknown)::after { content: " (last known)"; }
+
+/* Flags: what is wrong with a node. Used beside the gateway status and in the table. */
+
+.health-flags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.flag {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--fault-line);
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--fault);
+  background: var(--fault-soft);
+}
+.flag b { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+/* A dead node is the most serious of them. */
+.flag--faulty { border-color: var(--fault); color: #fff; background: var(--fault); }
+.flag--ok, .flag--waiting { border-color: var(--line); color: var(--ink-soft); background: var(--paper); }
+a.flag:hover, a.flag:focus-visible { outline: 2px solid var(--fault); outline-offset: 1px; }
+.gateway-status--stale .flag { border-color: #fff; }
+
+/* Sections below the map */
+
+.detail { padding: 18px; border-top: 1px solid var(--line); }
+.detail__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.detail h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+.detail__note { font-size: 12px; color: var(--ink-soft); }
+
+.periods { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.periods__choice {
+  padding: 5px 12px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--card);
+  cursor: pointer;
+}
+.periods__choice:first-child { border-left: 0; }
+.periods__choice:hover { background: var(--paper); }
+.periods__choice[aria-pressed="true"] { font-weight: 700; color: #fff; background: var(--bar); }
+.periods__choice:focus-visible { outline: 2px solid var(--curve); outline-offset: -2px; }
+
+/* Curves */
+
+.curves { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+.curve {
+  min-width: 0;
+  padding: 12px 12px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+}
+.curve__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin-bottom: 4px;
+}
+.curve__name { margin: 0; font-size: 15px; font-weight: 600; }
+.curve__readout {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+.curve__readout b { color: var(--ink); }
+.curve__empty { font-size: 13px; color: var(--ink-soft); }
+
+/* Sideways movement over a chart reads the curve; up and down still scrolls the page. */
+.curve__plot { touch-action: pan-y; cursor: crosshair; }
+.curve__svg { display: block; }
+
+.curve__title { font-size: 12px; font-weight: 600; fill: var(--ink-soft); }
+.curve__tick { font-size: 11px; font-variant-numeric: tabular-nums; fill: var(--ink-soft); }
+.curve__grid { stroke: var(--grid); stroke-width: 1; }
+.curve__grid--zero { stroke: var(--grid-zero); }
+.curve__line {
+  fill: none;
+  stroke: var(--curve);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.curve__area { fill: var(--curve); fill-opacity: 0.1; }
+.curve__end { fill: var(--curve); stroke: var(--card); stroke-width: 2; }
+.curve__crosshair { stroke: var(--ink-soft); stroke-width: 1; }
+.curve__hover { fill: var(--card); stroke: var(--curve); stroke-width: 2; }
+
+/* Node health */
+
+.health {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  border-spacing: 0;
+  font-size: 14px;
+  background: var(--card);
+}
+.health th, .health td { padding: 9px 12px; text-align: left; vertical-align: middle; }
+.health thead th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
+}
+.health tbody tr + tr > * { border-top: 1px solid var(--line); }
+
+.health__node { border-left: 6px solid transparent; font-weight: 400; }
+.health__name { display: block; font-weight: 600; }
+.health__role { display: block; font-size: 12px; color: var(--ink-soft); }
+.health__status .flag { margin: 2px 4px 2px 0; }
+.health__value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* A node that needs attention stands out as a whole row; the value at fault is bold. */
+.health__row--attention { background: var(--fault-soft); }
+.health__row--attention .health__node { border-left-color: var(--fault); }
+.health__value--attention { font-weight: 700; color: var(--fault); }
+
+@media (max-width: 800px) {
+  /* One column: the map above the node list, each as tall as it needs. */
+  .layout { height: auto; }
+
+  .gateway-status, .detail { padding-left: 14px; padding-right: 14px; }
+  .curves { grid-template-columns: 1fr; }
+
+  /* The health table becomes one card per node. */
+  .health, .health tbody { display: block; border: 0; background: none; }
+  .health thead { display: none; }
+  .health__row {
+    display: block;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--card);
+  }
+  .health__row > * { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .health tbody tr + tr > *, .health__row > * + * { border-top: 1px solid var(--line); }
+  .health tbody tr + tr > .health__node { border-top: 0; }
+  .health__node { display: block; }
+  .health td::before {
+    content: attr(data-label);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ink-soft);
+  }
+  .health__row--attention { border-color: var(--fault-line); background: var(--fault-soft); }
+  .health tbody .health__row--attention > * { border-top-color: var(--fault-line); }
+  .health__status { flex-wrap: wrap; justify-content: flex-end; }
+  .health__status::before { margin-right: auto; }
+}

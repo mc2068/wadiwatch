@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .backend import REJECTED
+from .health_api import health_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -35,6 +36,9 @@ def create_app(backend, uplink=None):
     @app.get("/api/nodes")
     def nodes():
         return backend.nodes()
+
+    # Curves, node health and staleness.
+    app.include_router(health_router(backend))
 
     @app.post("/api/ingest")
     async def ingest(request: Request):

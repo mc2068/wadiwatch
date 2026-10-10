@@ -4,6 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 
+from . import health
 from .contract import ALERT_LEVELS, WADI_NODE, ContractError, parse_message
 from .store import MessageStore
 
@@ -13,11 +14,22 @@ STORED = "stored"
 DUPLICATE = "duplicate"
 REJECTED = "rejected"
 
+# The period of a curve when the caller does not choose one.
+DEFAULT_CURVE_PERIOD_S = 24 * 3600
+
 
 @dataclass(frozen=True)
 class IngestResult:
     status: str
     error: str | None = None
+
+
+class NotAWadiNode(LookupError):
+    """The site has no wadi node with this identifier."""
+
+
+class EmptyPeriod(ValueError):
+    """The period ends before it starts."""
 
 
 class Backend:
@@ -63,6 +75,47 @@ class Backend:
             },
             "nodes": nodes,
         }
+
+    # Curves, node health and staleness.
+
+    def readings(self, node_id, start=None, end=None):
+        """The curve of one wadi node: its level and rate of rise over a period.
+
+        `start` and `end` are Unix seconds on the gateway's clock, both
+        included. The period ends now and lasts a day unless the caller says
+        otherwise.
+        """
+        if self.site.role_of(node_id) != WADI_NODE:
+            raise NotAWadiNode(node_id)
+        if end is None:
+            end = int(self._clock())
+        if start is None:
+            start = end - DEFAULT_CURVE_PERIOD_S
+        if start > end:
+            raise EmptyPeriod(f"the period ends ({end}) before it starts ({start})")
+        with self._store.reader() as reader:
+            readings = reader.readings_between(node_id, start, end)
+        return {
+            "node": node_id,
+            "from": start,
+            "to": end,
+            "readings": [
+                {
+                    "ts": reading["ts"],
+                    "level_cm": reading["level_cm"],
+                    "rise_cm_min": reading["rise_cm_min"],
+                }
+                for reading in readings
+            ],
+        }
+
+    def health(self):
+        """Every node's health from its latest heartbeat, and how old the gateway's data is."""
+        with self._store.reader() as reader:
+            wadi_alert_levels = [
+                self._wadi_node_alert(reader, node)[0] for node in self.site.wadi_nodes
+            ]
+            return health.describe(reader, self.site, self._clock(), wadi_alert_levels)
 
     def _describe(self, reader, node):
         if node.role == WADI_NODE:

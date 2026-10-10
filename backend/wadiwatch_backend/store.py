@@ -86,6 +86,31 @@ class Reader:
             return self._latest("node = ?", (node,))
         return self._latest("node = ? AND kind = ?", (node, kind))
 
+    # Curves, node health and staleness.
+
+    def readings_between(self, node, start, end):
+        """The readings of a wadi node the gateway stamped from `start` to `end`, oldest first."""
+        rows = self._connection.execute(
+            "SELECT body FROM messages WHERE node = ? AND kind = 'reading' AND ts BETWEEN ? AND ?"
+            " ORDER BY ts, id",
+            (node, start, end),
+        )
+        return [json.loads(body) for (body,) in rows]
+
+    def first_ts(self):
+        """Gateway time of the first message ever stored, or None."""
+        row = self._connection.execute("SELECT ts FROM messages ORDER BY id LIMIT 1").fetchone()
+        return row[0] if row else None
+
+    def last_received_at(self):
+        """Backend time at which the latest message arrived, or None."""
+        row = self._connection.execute(
+            "SELECT received_at FROM messages ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return row[0] if row else None
+
+    # Alert levels.
+
     def latest_all_clear(self, wadi_node):
         return self._latest("kind = 'all_clear' AND wadi_node = ?", (wadi_node,))
 
