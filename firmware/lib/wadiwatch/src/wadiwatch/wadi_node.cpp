@@ -2,8 +2,13 @@
 
 namespace wadiwatch {
 
-WadiNode::WadiNode(const WadiNodeConfig& config, Clock& clock, LevelSensor& sensor, Radio& radio)
-    : config_(config), clock_(clock), sensor_(sensor), radio_(radio) {}
+WadiNode::WadiNode(const WadiNodeConfig& config, const SiteAuth& auth, Clock& clock,
+                   LevelSensor& sensor, Radio& radio, PersistentStorage& storage)
+    : config_(config),
+      clock_(clock),
+      sensor_(sensor),
+      radio_(radio),
+      codec_(auth, config.id, storage) {}
 
 void WadiNode::tick() {
   const uint64_t now = clock_.nowMs();
@@ -24,9 +29,11 @@ void WadiNode::measure() {
 }
 
 void WadiNode::sendAlert() {
-  const Packet packet = {PacketKind::Alert, config_.id, alertLevel_};
+  Packet packet = Packet();
+  packet.kind = PacketKind::Alert;
+  packet.alert.alertLevel = alertLevel_;
   uint8_t frame[kMaxPacketSize];
-  const size_t length = encodePacket(packet, frame, sizeof(frame));
+  const size_t length = codec_.encode(packet, frame, sizeof(frame));
   if (length > 0) radio_.send(frame, length);
 }
 

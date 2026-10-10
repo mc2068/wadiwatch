@@ -1,18 +1,18 @@
 #include "wadiwatch/siren_node.h"
 
-#include "wadiwatch/packet.h"
-
 namespace wadiwatch {
 
-SirenNode::SirenNode(Radio& radio, SirenOutput& siren) : radio_(radio), siren_(siren) {}
+SirenNode::SirenNode(const SirenNodeConfig& config, const SiteAuth& auth, Radio& radio,
+                     SirenOutput& siren, PersistentStorage& storage)
+    : radio_(radio), siren_(siren), codec_(auth, config.id, storage) {}
 
 void SirenNode::tick() {
   uint8_t frame[kMaxPacketSize];
   size_t length;
   while ((length = radio_.receive(frame, sizeof(frame))) > 0) {
     Packet packet;
-    if (!decodePacket(frame, length, packet)) continue;
-    if (packet.kind == PacketKind::Alert && packet.alertLevel >= AlertLevel::Warning) {
+    if (!codec_.decode(frame, length, packet)) continue;
+    if (packet.kind == PacketKind::Alert && packet.alert.alertLevel >= AlertLevel::Warning) {
       siren_.setSiren(true);
     }
   }

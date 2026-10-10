@@ -1,4 +1,4 @@
-// Site configuration: the one place where node identifiers and thresholds are set.
+// Site configuration: the one place where node identifiers, thresholds and the site key are set.
 #pragma once
 
 #include <cstdint>
@@ -16,11 +16,19 @@ struct WadiNodeConfig {
   uint32_t measureIntervalMs;
 };
 
+struct SirenNodeConfig {
+  NodeId id;
+};
+
 struct SiteConfig {
   WadiNodeConfig wadiNode;
+  SirenNodeConfig sirenNode;
+  // The shared key and the nodes that packets are accepted from.
+  SiteAuth auth;
 };
 
 // The bench prototype. Values are starting points, to be calibrated per site.
+// Its key is a published test key unless a local key file is present (see site_config.cpp).
 const SiteConfig& prototypeSite();
 
 }  // namespace wadiwatch

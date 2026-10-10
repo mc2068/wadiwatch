@@ -1,2 +1,4 @@
 .pio/
 .vscode/
+# A real site key stays on the machine that flashes the nodes (see site_config.cpp).
+lib/wadiwatch/src/wadiwatch/site_key_local.h

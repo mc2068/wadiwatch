@@ -16,7 +16,9 @@ class UnconnectedLevelSensor : public wadiwatch::LevelSensor {
 EspClock espClock;
 UnconnectedLevelSensor levelSensor;
 UnconnectedRadio radio;
-wadiwatch::WadiNode node(wadiwatch::prototypeSite().wadiNode, espClock, levelSensor, radio);
+UnconnectedStorage storage;
+wadiwatch::WadiNode node(wadiwatch::prototypeSite().wadiNode, wadiwatch::prototypeSite().auth,
+                         espClock, levelSensor, radio, storage);
 
 }  // namespace
 

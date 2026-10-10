@@ -16,3 +16,10 @@ class UnconnectedRadio : public wadiwatch::Radio {
   void send(const uint8_t*, size_t) override {}
   size_t receive(uint8_t*, size_t) override { return 0; }
 };
+
+// Stands in for flash storage until its adapter is written: remembers nothing across a restart.
+class UnconnectedStorage : public wadiwatch::PersistentStorage {
+ public:
+  bool load(uint32_t, uint32_t&) override { return false; }
+  void store(uint32_t, uint32_t) override {}
+};

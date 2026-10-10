@@ -32,7 +32,7 @@ node build.js
 
 ## Firmware
 
-The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
+The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output, persistent storage). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.
 
 Setup, once:
 
@@ -62,4 +62,6 @@ pio run
 
 If `pio` is not on the PATH, use `python -m platformio` in its place. The board is set in `firmware/platformio.ini`; node identifiers and thresholds are set only in the site configuration inside the `wadiwatch` library.
 
-The hardware adapters (sensor, LoRa radio, siren driver) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway and dashboard will be added during the prototype phase.
+Every radio packet is signed with a key shared by the nodes of one site, and a node ignores packets that are not signed with it, come from a node outside the site, or repeat an earlier packet. The key in the repository is a published test key, for tests and the bench only. A real site key never goes into the repository: put it in `firmware/lib/wadiwatch/src/wadiwatch/site_key_local.h`, which git ignores, as described at the top of `site_config.cpp`.
+
+The hardware adapters (sensor, LoRa radio, siren driver, flash storage) are not written yet, so the ESP32 builds currently run the cores against placeholders. The gateway and dashboard will be added during the prototype phase.

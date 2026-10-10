@@ -3,6 +3,7 @@
 
 #include "../esp32/esp_ports.h"
 #include "wadiwatch/siren_node.h"
+#include "wadiwatch/site_config.h"
 
 namespace {
 
@@ -14,7 +15,9 @@ class SerialSirenOutput : public wadiwatch::SirenOutput {
 
 UnconnectedRadio radio;
 SerialSirenOutput siren;
-wadiwatch::SirenNode node(radio, siren);
+UnconnectedStorage storage;
+wadiwatch::SirenNode node(wadiwatch::prototypeSite().sirenNode, wadiwatch::prototypeSite().auth,
+                          radio, siren, storage);
 
 }  // namespace
 

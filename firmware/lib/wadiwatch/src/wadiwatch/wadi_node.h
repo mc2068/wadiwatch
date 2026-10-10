@@ -11,7 +11,8 @@ namespace wadiwatch {
 
 class WadiNode {
  public:
-  WadiNode(const WadiNodeConfig& config, Clock& clock, LevelSensor& sensor, Radio& radio);
+  WadiNode(const WadiNodeConfig& config, const SiteAuth& auth, Clock& clock, LevelSensor& sensor,
+           Radio& radio, PersistentStorage& storage);
 
   // Call repeatedly; takes a measurement whenever one is due.
   void tick();
@@ -24,6 +25,7 @@ class WadiNode {
   Clock& clock_;
   LevelSensor& sensor_;
   Radio& radio_;
+  PacketCodec codec_;
   uint64_t nextMeasurementAtMs_ = 0;
   AlertLevel alertLevel_ = AlertLevel::None;
 };
