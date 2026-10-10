@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "wadiwatch/alert_repeater.h"
 #include "wadiwatch/operating_mode.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/ports.h"
@@ -21,11 +22,13 @@ class WadiNode {
            RainGauge& rainGauge,
            NodeHealth& health,
            Radio& radio,
-           PersistentStorage& storage);
+           PersistentStorage& storage,
+           RandomSource& random);
 
   // Call whenever the device is awake. Does whatever is due (counting rain,
-  // measuring, sending a heartbeat), then asks to sleep until the next thing is
-  // due. Safe to call early: a rain-gauge tip wakes the device before its time.
+  // measuring, repeating an alert, sending a heartbeat), then asks to sleep until
+  // the next thing is due. Safe to call early: a rain-gauge tip wakes the device
+  // before its time.
   void tick();
 
  private:
@@ -33,8 +36,11 @@ class WadiNode {
   void measure(uint64_t nowMs);
   void raiseAlertLevel(uint64_t nowMs);
   void sendAlert();
+  void repeatAlert(uint64_t nowMs);
   void sendHeartbeat();
   void send(Packet& packet);
+  size_t send(Packet& packet, uint8_t* frame, size_t capacity);
+  void transmit(const uint8_t* frame, size_t length);
   void sleepUntilNextDue(uint64_t nowMs);
 
   WadiNodeConfig config_;
@@ -47,6 +53,7 @@ class WadiNode {
   PacketCodec codec_;
   ModeController mode_;
   RainWindow rain_;
+  AlertRepeater alertRepeater_;
   bool started_ = false;
   uint64_t nextMeasurementAtMs_ = 0;
   uint64_t nextHeartbeatAtMs_ = 0;

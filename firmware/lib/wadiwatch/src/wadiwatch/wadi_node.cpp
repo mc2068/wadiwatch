@@ -28,7 +28,8 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
                    RainGauge& rainGauge,
                    NodeHealth& health,
                    Radio& radio,
-                   PersistentStorage& storage)
+                   PersistentStorage& storage,
+                   RandomSource& random)
     : config_(config),
       clock_(clock),
       sleep_(sleep),
@@ -38,7 +39,8 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
       radio_(radio),
       codec_(auth, config.id, storage),
       mode_(config.mode),
-      rain_(config.rain, config.alertThresholds.watchRainWindowMs) {}
+      rain_(config.rain, config.alertThresholds.watchRainWindowMs),
+      alertRepeater_(config.alertRepeat, random) {}
 
 void WadiNode::tick() {
   const uint64_t now = clock_.nowMs();
@@ -61,6 +63,7 @@ void WadiNode::tick() {
   }
 
   raiseAlertLevel(now);
+  repeatAlert(now);
 
   if (now >= nextHeartbeatAtMs_) {
     sendHeartbeat();
@@ -107,7 +110,17 @@ void WadiNode::sendAlert() {
   packet.alert.alertLevel = alertLevel_;
   // The rate of rise is not measured yet.
   packet.alert.levelMm = levelMm(levelCm_);
-  send(packet);
+  // Every alert goes out several times. The further transmissions are these same
+  // bytes: a receiver acts on the first copy it hears and refuses the rest.
+  uint8_t frame[kMaxPacketSize];
+  const size_t length = send(packet, frame, sizeof(frame));
+  alertRepeater_.start(frame, length, clock_.nowMs());
+}
+
+void WadiNode::repeatAlert(uint64_t nowMs) {
+  size_t length = 0;
+  const uint8_t* frame = alertRepeater_.takeDue(nowMs, length);
+  if (frame != nullptr) transmit(frame, length);
 }
 
 void WadiNode::sendHeartbeat() {
@@ -121,17 +134,32 @@ void WadiNode::sendHeartbeat() {
   send(packet);
 }
 
-// Everything this node transmits leaves through here: the codec stamps the
+// Every packet this node sends leaves through here: the codec stamps the
 // packet with the node's identifier and next counter, and signs it.
 void WadiNode::send(Packet& packet) {
   uint8_t frame[kMaxPacketSize];
-  const size_t length = codec_.encode(packet, frame, sizeof(frame));
+  send(packet, frame, sizeof(frame));
+}
+
+// The same, for a caller that keeps the frame to transmit it again. Returns the
+// frame's length, or 0 if nothing was sent.
+size_t WadiNode::send(Packet& packet, uint8_t* frame, size_t capacity) {
+  const size_t length = codec_.encode(packet, frame, capacity);
+  transmit(frame, length);
+  return length;
+}
+
+// The only place this node touches the radio's transmitter.
+void WadiNode::transmit(const uint8_t* frame, size_t length) {
   if (length > 0) radio_.send(frame, length);
 }
 
 void WadiNode::sleepUntilNextDue(uint64_t nowMs) {
-  const uint64_t nextDueAtMs =
+  uint64_t nextDueAtMs =
       nextMeasurementAtMs_ < nextHeartbeatAtMs_ ? nextMeasurementAtMs_ : nextHeartbeatAtMs_;
+  if (alertRepeater_.pending() && alertRepeater_.dueAtMs() < nextDueAtMs) {
+    nextDueAtMs = alertRepeater_.dueAtMs();
+  }
   if (nextDueAtMs > nowMs) sleep_.requestSleepMs(nextDueAtMs - nowMs);
 }
 

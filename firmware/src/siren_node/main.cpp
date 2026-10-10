@@ -15,16 +15,26 @@ class SerialSirenOutput : public wadiwatch::SirenOutput {
   void setStrobe(bool on) override { Serial.println(on ? "STROBE ON" : "STROBE OFF"); }
 };
 
+// Stands in for the button under the cover until its adapter is written: never pressed.
+class UnconnectedButton : public wadiwatch::Button {
+ public:
+  bool wasPressed() override { return false; }
+};
+
 EspClock espClock;
 UnconnectedRadio radio;
 SerialSirenOutput siren;
 UnconnectedStorage storage;
+UnmeasuredNodeHealth nodeHealth;
+UnconnectedButton button;
 wadiwatch::SirenNode node(wadiwatch::prototypeSite().sirenNode,
                           wadiwatch::prototypeSite().auth,
                           espClock,
                           radio,
                           siren,
-                          storage);
+                          storage,
+                          nodeHealth,
+                          button);
 
 }  // namespace
 
