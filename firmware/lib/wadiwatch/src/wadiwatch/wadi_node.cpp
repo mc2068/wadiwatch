@@ -4,13 +4,31 @@
 
 namespace wadiwatch {
 
+namespace {
+
+constexpr float kMmPerCm = 10.0f;
+constexpr float kMaxLevelMm = 65535.0f;
+
+// A level as packets carry it: whole millimetres above the wadi bed. A reading
+// below the bed (sensor noise over a dry wadi) travels as zero.
+uint16_t levelMm(float levelCm) {
+  const float mm = levelCm * kMmPerCm + 0.5f;
+  if (!(mm > 0.0f)) return 0;
+  if (mm >= kMaxLevelMm) return static_cast<uint16_t>(kMaxLevelMm);
+  return static_cast<uint16_t>(mm);
+}
+
+}  // namespace
+
 WadiNode::WadiNode(const WadiNodeConfig& config,
+                   const SiteAuth& auth,
                    Clock& clock,
                    SleepControl& sleep,
                    LevelSensor& sensor,
                    RainGauge& rainGauge,
                    NodeHealth& health,
-                   Radio& radio)
+                   Radio& radio,
+                   PersistentStorage& storage)
     : config_(config),
       clock_(clock),
       sleep_(sleep),
@@ -18,6 +36,7 @@ WadiNode::WadiNode(const WadiNodeConfig& config,
       rainGauge_(rainGauge),
       health_(health),
       radio_(radio),
+      codec_(auth, config.id, storage),
       mode_(config.mode),
       rain_(config.rain, config.alertThresholds.watchRainWindowMs) {}
 
@@ -85,26 +104,28 @@ void WadiNode::raiseAlertLevel(uint64_t nowMs) {
 void WadiNode::sendAlert() {
   Packet packet = Packet();
   packet.kind = PacketKind::Alert;
-  packet.sender = config_.id;
-  packet.alertLevel = alertLevel_;
-  uint8_t frame[kMaxPacketSize];
-  const size_t length = encodePacket(packet, frame, sizeof(frame));
-  if (length > 0) radio_.send(frame, length);
+  packet.alert.alertLevel = alertLevel_;
+  // The rate of rise is not measured yet.
+  packet.alert.levelMm = levelMm(levelCm_);
+  send(packet);
 }
 
 void WadiNode::sendHeartbeat() {
   Packet packet = Packet();
   packet.kind = PacketKind::Heartbeat;
-  packet.sender = config_.id;
   packet.heartbeat.batteryMillivolts = health_.batteryMillivolts();
   packet.heartbeat.signalStrengthDbm = health_.signalStrengthDbm();
   packet.heartbeat.tamper = health_.tamperDetected();
   packet.heartbeat.hasLastLevel = hasLevel_;
-  // Rounded to the nearest centimetre.
-  packet.heartbeat.lastLevelCm =
-      static_cast<int16_t>(levelCm_ < 0 ? levelCm_ - 0.5f : levelCm_ + 0.5f);
+  packet.heartbeat.lastLevelMm = levelMm(levelCm_);
+  send(packet);
+}
+
+// Everything this node transmits leaves through here: the codec stamps the
+// packet with the node's identifier and next counter, and signs it.
+void WadiNode::send(Packet& packet) {
   uint8_t frame[kMaxPacketSize];
-  const size_t length = encodePacket(packet, frame, sizeof(frame));
+  const size_t length = codec_.encode(packet, frame, sizeof(frame));
   if (length > 0) radio_.send(frame, length);
 }
 

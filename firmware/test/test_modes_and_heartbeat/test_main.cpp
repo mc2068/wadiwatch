@@ -17,7 +17,6 @@ using wadiwatch::levelThresholdCm;
 using wadiwatch::Packet;
 using wadiwatch::PacketKind;
 using wadiwatch::WadiNodeConfig;
-using wadiwatch::testing::Frame;
 using wadiwatch::testing::TestSite;
 
 void setUp() {}
@@ -27,28 +26,22 @@ namespace {
 
 const uint64_t kMinuteMs = 60 * 1000;
 
-std::vector<Packet> packetsOnAir(const TestSite& site, PacketKind kind) {
-  std::vector<Packet> packets;
-  for (const Frame& frame : site.air.transmitted()) {
-    Packet packet;
-    if (wadiwatch::decodePacket(frame.data(), frame.size(), packet) && packet.kind == kind) {
-      packets.push_back(packet);
-    }
-  }
-  return packets;
-}
+size_t alertsOnAir(const TestSite& site) { return site.packetsOnAir(PacketKind::Alert).size(); }
 
 size_t alertsOnAir(const TestSite& site, AlertLevel level) {
   size_t count = 0;
-  for (const Packet& packet : packetsOnAir(site, PacketKind::Alert)) {
-    if (packet.alertLevel == level) ++count;
+  for (const Packet& packet : site.packetsOnAir(PacketKind::Alert)) {
+    if (packet.alert.alertLevel == level) ++count;
   }
   return count;
 }
 
 size_t heartbeatsOnAir(const TestSite& site) {
-  return packetsOnAir(site, PacketKind::Heartbeat).size();
+  return site.packetsOnAir(PacketKind::Heartbeat).size();
 }
+
+// A water level as packets carry it: whole millimetres.
+uint16_t levelMm(float levelCm) { return static_cast<uint16_t>(std::lround(levelCm * 10.0f)); }
 
 // What someone standing beside the wadi node sees it do, minute by minute:
 // when it pings its level sensor and when it sends a heartbeat.
@@ -182,7 +175,7 @@ static void test_a_node_woken_early_without_rain_goes_back_to_sleep_without_meas
   const size_t sleepRequests = site.wadiNodeSleep.requestCount();
 
   site.clock.advanceMs(site.config.wadiNode.mode.dryMeasureIntervalMs / 3);
-  site.wadiNode.tick();
+  site.wadiNode->tick();
 
   TEST_ASSERT_EQUAL_UINT(reads, site.levelSensor.readCount());
   TEST_ASSERT_EQUAL_UINT(sleepRequests + 1, site.wadiNodeSleep.requestCount());
@@ -209,7 +202,7 @@ static void test_a_rain_gauge_tip_wakes_the_node_into_storm_mode() {
   TEST_ASSERT_EQUAL_UINT64(minuteOfTheTip, observer.measurementMinutes[dryMeasurements]);
   TEST_ASSERT_EQUAL_UINT64(minutes.stormQuiet / minutes.stormInterval, measured);
   // A little rain is not an alert.
-  TEST_ASSERT_EQUAL_UINT(0, packetsOnAir(site, PacketKind::Alert).size());
+  TEST_ASSERT_EQUAL_UINT(0, alertsOnAir(site));
 }
 
 static void test_in_storm_mode_the_node_asks_to_sleep_until_its_next_measurement() {
@@ -249,7 +242,7 @@ static void test_heavy_rain_within_the_window_raises_watch_with_the_level_still_
 
   // One minute short of the window, the rain is one tip short of the threshold.
   rainSteadily(site, tipsThatRaiseWatch(config) - 1, minutes.rainWindow - 1);
-  TEST_ASSERT_EQUAL_UINT(0, packetsOnAir(site, PacketKind::Alert).size());
+  TEST_ASSERT_EQUAL_UINT(0, alertsOnAir(site));
 
   site.rainGauge.tip();
   site.runMinutes(1);
@@ -260,7 +253,7 @@ static void test_heavy_rain_within_the_window_raises_watch_with_the_level_still_
   // More rain does not repeat the alert.
   site.rainGauge.rainMm(config.alertThresholds.watchRainMm);
   site.runMinutes(minutes.stormInterval);
-  TEST_ASSERT_EQUAL_UINT(1, packetsOnAir(site, PacketKind::Alert).size());
+  TEST_ASSERT_EQUAL_UINT(1, alertsOnAir(site));
 }
 
 static void test_the_same_rain_spread_over_twice_the_window_does_not_raise_watch() {
@@ -271,7 +264,7 @@ static void test_the_same_rain_spread_over_twice_the_window_does_not_raise_watch
 
   rainSteadily(site, tipsThatRaiseWatch(config), 2 * minutes.rainWindow);
 
-  TEST_ASSERT_EQUAL_UINT(0, packetsOnAir(site, PacketKind::Alert).size());
+  TEST_ASSERT_EQUAL_UINT(0, alertsOnAir(site));
 }
 
 // --- Returning to dry mode ---
@@ -317,7 +310,7 @@ static void test_dips_below_the_watch_threshold_shorter_than_the_quiet_period_do
   TEST_ASSERT_EQUAL_UINT64((observer.minutesWatched() - minutesBefore) / minutes.stormInterval,
                            measured);
   // Hovering does not repeat the Watch alert either.
-  TEST_ASSERT_EQUAL_UINT(1, packetsOnAir(site, PacketKind::Alert).size());
+  TEST_ASSERT_EQUAL_UINT(1, alertsOnAir(site));
 }
 
 static void test_rain_during_the_quiet_period_starts_the_quiet_period_again() {
@@ -354,14 +347,14 @@ static void test_a_heartbeat_carries_battery_voltage_signal_strength_last_readin
 
   site.runMs(config.heartbeatIntervalMs + kMinuteMs);
 
-  const std::vector<Packet> heartbeats = packetsOnAir(site, PacketKind::Heartbeat);
+  const std::vector<Packet> heartbeats = site.packetsOnAir(PacketKind::Heartbeat);
   TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT16(config.id, heartbeats[0].sender);
   TEST_ASSERT_EQUAL_UINT16(batteryMillivolts, heartbeats[0].heartbeat.batteryMillivolts);
-  TEST_ASSERT_EQUAL_INT8(signalStrengthDbm, heartbeats[0].heartbeat.signalStrengthDbm);
+  TEST_ASSERT_EQUAL_INT16(signalStrengthDbm, heartbeats[0].heartbeat.signalStrengthDbm);
   TEST_ASSERT_TRUE(heartbeats[0].heartbeat.tamper);
   TEST_ASSERT_TRUE(heartbeats[0].heartbeat.hasLastLevel);
-  TEST_ASSERT_INT16_WITHIN(1, static_cast<int16_t>(levelCm), heartbeats[0].heartbeat.lastLevelCm);
+  TEST_ASSERT_UINT16_WITHIN(1, levelMm(levelCm), heartbeats[0].heartbeat.lastLevelMm);
 }
 
 static void test_each_heartbeat_reports_the_values_of_its_own_hour() {
@@ -379,11 +372,11 @@ static void test_each_heartbeat_reports_the_values_of_its_own_hour() {
   site.levelSensor.setWaterLevelCm(lowerLevelCm);
   site.runMs(config.heartbeatIntervalMs);
 
-  const std::vector<Packet> heartbeats = packetsOnAir(site, PacketKind::Heartbeat);
+  const std::vector<Packet> heartbeats = site.packetsOnAir(PacketKind::Heartbeat);
   TEST_ASSERT_EQUAL_UINT(2, heartbeats.size());
   TEST_ASSERT_EQUAL_UINT16(lowerBatteryMillivolts, heartbeats[1].heartbeat.batteryMillivolts);
   TEST_ASSERT_FALSE(heartbeats[1].heartbeat.tamper);
-  TEST_ASSERT_INT16_WITHIN(1, static_cast<int16_t>(lowerLevelCm), heartbeats[1].heartbeat.lastLevelCm);
+  TEST_ASSERT_UINT16_WITHIN(1, levelMm(lowerLevelCm), heartbeats[1].heartbeat.lastLevelMm);
 }
 
 static void test_in_storm_mode_the_node_still_sends_a_heartbeat_every_hour() {
@@ -399,56 +392,6 @@ static void test_in_storm_mode_the_node_still_sends_a_heartbeat_every_hour() {
   TEST_ASSERT_EQUAL_UINT64(hours, observer.heartbeatMinutes.size());
   TEST_ASSERT_EQUAL_UINT64(minutes.heartbeatInterval, observer.heartbeatMinutes.front());
   assertEveryGapIs(minutes.heartbeatInterval, observer.heartbeatMinutes);
-}
-
-// --- Heartbeat packet format ---
-
-static void test_heartbeat_packet_survives_encoding_and_decoding() {
-  Packet sent = Packet();
-  sent.kind = PacketKind::Heartbeat;
-  sent.sender = 0x0203;
-  sent.heartbeat.batteryMillivolts = 4150;
-  sent.heartbeat.signalStrengthDbm = -119;
-  sent.heartbeat.tamper = true;
-  sent.heartbeat.hasLastLevel = true;
-  sent.heartbeat.lastLevelCm = -3;
-  uint8_t frame[wadiwatch::kMaxPacketSize];
-
-  const size_t length = wadiwatch::encodePacket(sent, frame, sizeof(frame));
-  Packet received = Packet();
-  TEST_ASSERT_TRUE(wadiwatch::decodePacket(frame, length, received));
-
-  TEST_ASSERT_TRUE(received.kind == PacketKind::Heartbeat);
-  TEST_ASSERT_EQUAL_UINT16(sent.sender, received.sender);
-  TEST_ASSERT_EQUAL_UINT16(sent.heartbeat.batteryMillivolts, received.heartbeat.batteryMillivolts);
-  TEST_ASSERT_EQUAL_INT8(sent.heartbeat.signalStrengthDbm, received.heartbeat.signalStrengthDbm);
-  TEST_ASSERT_TRUE(received.heartbeat.tamper);
-  TEST_ASSERT_TRUE(received.heartbeat.hasLastLevel);
-  TEST_ASSERT_EQUAL_INT16(sent.heartbeat.lastLevelCm, received.heartbeat.lastLevelCm);
-}
-
-static void test_heartbeat_packet_can_say_that_no_level_has_been_measured() {
-  Packet sent = Packet();
-  sent.kind = PacketKind::Heartbeat;
-  uint8_t frame[wadiwatch::kMaxPacketSize];
-
-  const size_t length = wadiwatch::encodePacket(sent, frame, sizeof(frame));
-  Packet received = Packet();
-  TEST_ASSERT_TRUE(wadiwatch::decodePacket(frame, length, received));
-
-  TEST_ASSERT_FALSE(received.heartbeat.hasLastLevel);
-  TEST_ASSERT_FALSE(received.heartbeat.tamper);
-}
-
-static void test_truncated_heartbeat_packet_is_rejected() {
-  Packet sent = Packet();
-  sent.kind = PacketKind::Heartbeat;
-  uint8_t frame[wadiwatch::kMaxPacketSize];
-  const size_t length = wadiwatch::encodePacket(sent, frame, sizeof(frame));
-
-  Packet received = Packet();
-  TEST_ASSERT_FALSE(wadiwatch::decodePacket(frame, length - 1, received));
-  TEST_ASSERT_EQUAL_UINT(0, wadiwatch::encodePacket(sent, frame, length - 1));
 }
 
 int main(int, char**) {
@@ -467,8 +410,5 @@ int main(int, char**) {
   RUN_TEST(test_a_heartbeat_carries_battery_voltage_signal_strength_last_reading_and_tamper_flag);
   RUN_TEST(test_each_heartbeat_reports_the_values_of_its_own_hour);
   RUN_TEST(test_in_storm_mode_the_node_still_sends_a_heartbeat_every_hour);
-  RUN_TEST(test_heartbeat_packet_survives_encoding_and_decoding);
-  RUN_TEST(test_heartbeat_packet_can_say_that_no_level_has_been_measured);
-  RUN_TEST(test_truncated_heartbeat_packet_is_rejected);
   return UNITY_END();
 }

@@ -1,4 +1,4 @@
-// Siren node core: answers alerts heard over the radio with the siren and the strobe.
+// Siren node core: answers authenticated alerts heard over the radio with the siren and the strobe.
 // Warning sounds siren pattern 1 (intermittent), Evacuate a continuous siren;
 // the strobe is on in both cases. Watch produces no output.
 #pragma once
@@ -13,7 +13,12 @@ namespace wadiwatch {
 
 class SirenNode {
  public:
-  SirenNode(const SirenNodeConfig& config, Clock& clock, Radio& radio, SirenOutput& output);
+  SirenNode(const SirenNodeConfig& config,
+            const SiteAuth& auth,
+            Clock& clock,
+            Radio& radio,
+            SirenOutput& output,
+            PersistentStorage& storage);
 
   // Call repeatedly, at least as often as the shortest phase of the intermittent
   // pattern; handles every frame received since the last call and keeps the
@@ -28,6 +33,7 @@ class SirenNode {
   Clock& clock_;
   Radio& radio_;
   SirenOutput& output_;
+  PacketCodec codec_;
   // Highest alert level heard. Only ever rises.
   AlertLevel alertLevel_ = AlertLevel::None;
   uint64_t intermittentStartedAtMs_ = 0;

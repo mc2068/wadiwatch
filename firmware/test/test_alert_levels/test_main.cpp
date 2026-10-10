@@ -1,8 +1,12 @@
 // Scenario tests for the graded alert levels: what the wadi node puts on the air
 // and what a bystander at the siren node hears and sees.
+#include <cmath>
+#include <vector>
+
 #include <unity.h>
 
 #include "wadiwatch/alert_engine.h"
+#include "wadiwatch/packet.h"
 #include "wadiwatch_testing/test_site.h"
 
 using wadiwatch::AlertLevel;
@@ -227,6 +231,21 @@ static void test_alert_level_still_escalates_after_the_level_has_fallen_and_rise
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
 }
 
+static void test_an_alert_carries_the_level_that_raised_it() {
+  TestSite site;
+  const float levelCm = levelWithin(site, AlertLevel::Warning);
+
+  holdLevel(site, levelCm);
+
+  const std::vector<wadiwatch::Packet> alerts = site.packetsOnAir(wadiwatch::PacketKind::Alert);
+  TEST_ASSERT_EQUAL_UINT(1, alerts.size());
+  ASSERT_ALERT_LEVEL(AlertLevel::Warning, alerts[0].alert.alertLevel);
+  TEST_ASSERT_EQUAL_UINT16(site.config.wadiNode.id, alerts[0].sender);
+  // Packets carry the level in whole millimetres.
+  TEST_ASSERT_UINT16_WITHIN(1, static_cast<uint16_t>(std::lround(levelCm * 10.0f)),
+                            alerts[0].alert.levelMm);
+}
+
 static void test_thresholds_and_bank_full_depth_come_from_the_wadi_node_configuration() {
   // The same wadi node moved to a channel half as deep, with the same percentages.
   SiteConfig shallower = wadiwatch::prototypeSite();
@@ -276,6 +295,7 @@ int main(int, char**) {
   RUN_TEST(test_falling_level_does_not_lower_evacuate);
   RUN_TEST(test_falling_level_does_not_lower_warning);
   RUN_TEST(test_alert_level_still_escalates_after_the_level_has_fallen_and_risen_again);
+  RUN_TEST(test_an_alert_carries_the_level_that_raised_it);
   RUN_TEST(test_thresholds_and_bank_full_depth_come_from_the_wadi_node_configuration);
   RUN_TEST(test_each_threshold_is_configured_separately);
   return UNITY_END();

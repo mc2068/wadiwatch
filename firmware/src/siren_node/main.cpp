@@ -18,7 +18,13 @@ class SerialSirenOutput : public wadiwatch::SirenOutput {
 EspClock espClock;
 UnconnectedRadio radio;
 SerialSirenOutput siren;
-wadiwatch::SirenNode node(wadiwatch::prototypeSite().sirenNode, espClock, radio, siren);
+UnconnectedStorage storage;
+wadiwatch::SirenNode node(wadiwatch::prototypeSite().sirenNode,
+                          wadiwatch::prototypeSite().auth,
+                          espClock,
+                          radio,
+                          siren,
+                          storage);
 
 }  // namespace
 

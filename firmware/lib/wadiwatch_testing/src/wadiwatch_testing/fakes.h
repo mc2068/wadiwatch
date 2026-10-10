@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -126,6 +127,22 @@ class FakeSirenOutput : public SirenOutput {
  private:
   bool on_ = false;
   bool strobeOn_ = false;
+};
+
+// Stands for a device's flash: it outlives the core it is given to, as flash outlives a restart.
+class FakeStorage : public PersistentStorage {
+ public:
+  bool load(uint32_t key, uint32_t& value) override {
+    const auto found = values_.find(key);
+    if (found == values_.end()) return false;
+    value = found->second;
+    return true;
+  }
+
+  void store(uint32_t key, uint32_t value) override { values_[key] = value; }
+
+ private:
+  std::map<uint32_t, uint32_t> values_;
 };
 
 class Air;

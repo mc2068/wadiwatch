@@ -40,13 +40,16 @@ UnconnectedLevelSensor levelSensor;
 UnconnectedRainGauge rainGauge;
 UnmeasuredNodeHealth nodeHealth;
 UnconnectedRadio radio;
+UnconnectedStorage storage;
 wadiwatch::WadiNode node(wadiwatch::prototypeSite().wadiNode,
+                         wadiwatch::prototypeSite().auth,
                          espClock,
                          sleepControl,
                          levelSensor,
                          rainGauge,
                          nodeHealth,
-                         radio);
+                         radio,
+                         storage);
 
 }  // namespace
 

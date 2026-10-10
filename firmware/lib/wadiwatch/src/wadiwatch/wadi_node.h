@@ -14,12 +14,14 @@ namespace wadiwatch {
 class WadiNode {
  public:
   WadiNode(const WadiNodeConfig& config,
+           const SiteAuth& auth,
            Clock& clock,
            SleepControl& sleep,
            LevelSensor& sensor,
            RainGauge& rainGauge,
            NodeHealth& health,
-           Radio& radio);
+           Radio& radio,
+           PersistentStorage& storage);
 
   // Call whenever the device is awake. Does whatever is due (counting rain,
   // measuring, sending a heartbeat), then asks to sleep until the next thing is
@@ -32,6 +34,7 @@ class WadiNode {
   void raiseAlertLevel(uint64_t nowMs);
   void sendAlert();
   void sendHeartbeat();
+  void send(Packet& packet);
   void sleepUntilNextDue(uint64_t nowMs);
 
   WadiNodeConfig config_;
@@ -41,6 +44,7 @@ class WadiNode {
   RainGauge& rainGauge_;
   NodeHealth& health_;
   Radio& radio_;
+  PacketCodec codec_;
   ModeController mode_;
   RainWindow rain_;
   bool started_ = false;

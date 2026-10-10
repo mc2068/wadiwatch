@@ -2,8 +2,17 @@
 
 namespace wadiwatch {
 
-SirenNode::SirenNode(const SirenNodeConfig& config, Clock& clock, Radio& radio, SirenOutput& output)
-    : config_(config), clock_(clock), radio_(radio), output_(output) {}
+SirenNode::SirenNode(const SirenNodeConfig& config,
+                     const SiteAuth& auth,
+                     Clock& clock,
+                     Radio& radio,
+                     SirenOutput& output,
+                     PersistentStorage& storage)
+    : config_(config),
+      clock_(clock),
+      radio_(radio),
+      output_(output),
+      codec_(auth, config.id, storage) {}
 
 void SirenNode::tick() {
   const uint64_t nowMs = clock_.nowMs();
@@ -16,12 +25,13 @@ void SirenNode::handleReceivedFrames(uint64_t nowMs) {
   size_t length;
   while ((length = radio_.receive(frame, sizeof(frame))) > 0) {
     Packet packet;
-    if (!decodePacket(frame, length, packet)) continue;
+    // The codec is the only way in: a frame that is forged, foreign or replayed is dropped here.
+    if (!codec_.decode(frame, length, packet)) continue;
     if (packet.kind != PacketKind::Alert) continue;
     // A repeat of the alert in force must not restart the pattern, and a lower
     // alert level must not quieten the siren.
-    if (packet.alertLevel <= alertLevel_) continue;
-    alertLevel_ = packet.alertLevel;
+    if (packet.alert.alertLevel <= alertLevel_) continue;
+    alertLevel_ = packet.alert.alertLevel;
     if (alertLevel_ == AlertLevel::Warning) intermittentStartedAtMs_ = nowMs;
   }
 }

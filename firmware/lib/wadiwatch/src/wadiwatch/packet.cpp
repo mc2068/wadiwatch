@@ -1,87 +1,247 @@
 #include "wadiwatch/packet.h"
 
+#include <cstring>
+
+#include "wadiwatch/sha256.h"
+
 namespace wadiwatch {
 
 namespace {
 
-constexpr uint8_t kProtocolVersion = 1;
-// Every packet starts with: version, kind, sender (2 bytes, big-endian).
-constexpr size_t kHeaderSize = 4;
-// Header, alert level.
-constexpr size_t kAlertPacketSize = kHeaderSize + 1;
-// Header, battery millivolts (2 bytes), signal strength, flags, last level in cm (2 bytes).
-constexpr size_t kHeartbeatPacketSize = kHeaderSize + 6;
+// Frame layout, multi-byte fields big-endian:
+//
+//   0      protocol version
+//   1      packet kind
+//   2-3    sender node identifier
+//   4-7    message counter
+//   8-15   payload, by kind (unused bytes are zero):
+//            reading          level mm (2), rate of rise mm/min (2), rainfall 0.1 mm (2),
+//                             alert level (1), flags (1)
+//            alert            alert level (1), level mm (2), rate of rise mm/min (2)
+//            acknowledgement  alert sender (2), alert counter (4), alert level (1)
+//            heartbeat        battery mV (2), signal dBm (2), last level mm (2),
+//                             discarded readings (1), flags (1): tamper 0x01,
+//                             alert refresh lost 0x02, has last level 0x04
+//            all clear        wadi node identifier (2)
+//            test             nothing
+//   16-23  authentication code: HMAC-SHA-256 of bytes 0-15 under the site key,
+//          cut to its first 8 bytes
+constexpr uint8_t kProtocolVersion = 2;
+constexpr size_t kVersionOffset = 0;
+constexpr size_t kKindOffset = 1;
+constexpr size_t kSenderOffset = 2;
+constexpr size_t kCounterOffset = 4;
+constexpr size_t kPayloadOffset = 8;
+constexpr size_t kPayloadSize = 8;
+constexpr size_t kAuthCodeOffset = kPayloadOffset + kPayloadSize;
+constexpr size_t kAuthCodeSize = 8;
+static_assert(kAuthCodeOffset + kAuthCodeSize == kPacketSize, "frame layout and size disagree");
+static_assert(kPacketSize <= kMaxPacketSize, "a packet must fit a receive buffer");
 
+constexpr uint8_t kReadingFlagStormMode = 0x01;
 constexpr uint8_t kHeartbeatFlagTamper = 0x01;
-constexpr uint8_t kHeartbeatFlagHasLastLevel = 0x02;
-constexpr uint8_t kHeartbeatKnownFlags = kHeartbeatFlagTamper | kHeartbeatFlagHasLastLevel;
+constexpr uint8_t kHeartbeatFlagAlertRefreshLost = 0x02;
+constexpr uint8_t kHeartbeatFlagHasLastLevel = 0x04;
 
-void putUint16(uint8_t* buffer, uint16_t value) {
-  buffer[0] = static_cast<uint8_t>(value >> 8);
-  buffer[1] = static_cast<uint8_t>(value & 0xFF);
+constexpr uint32_t kCounterMax = 0xFFFFFFFFu;
+
+void put16(uint8_t* at, uint16_t value) {
+  at[0] = static_cast<uint8_t>(value >> 8);
+  at[1] = static_cast<uint8_t>(value);
 }
 
-uint16_t getUint16(const uint8_t* data) {
-  return static_cast<uint16_t>((data[0] << 8) | data[1]);
+void put32(uint8_t* at, uint32_t value) {
+  put16(at, static_cast<uint16_t>(value >> 16));
+  put16(at + 2, static_cast<uint16_t>(value));
 }
 
-size_t packetSize(PacketKind kind) {
-  switch (kind) {
-    case PacketKind::Alert:
-      return kAlertPacketSize;
-    case PacketKind::Heartbeat:
-      return kHeartbeatPacketSize;
+uint16_t get16(const uint8_t* at) { return static_cast<uint16_t>((at[0] << 8) | at[1]); }
+
+uint32_t get32(const uint8_t* at) {
+  return (static_cast<uint32_t>(get16(at)) << 16) | get16(at + 2);
+}
+
+bool isAlertLevel(uint8_t value) { return value <= static_cast<uint8_t>(AlertLevel::Evacuate); }
+
+// Writes the payload for the packet's kind. Returns false for a packet that makes no sense.
+bool writePayload(const Packet& packet, uint8_t* payload) {
+  std::memset(payload, 0, kPayloadSize);
+  switch (packet.kind) {
+    case PacketKind::Reading: {
+      const ReadingPayload& reading = packet.reading;
+      if (!isAlertLevel(static_cast<uint8_t>(reading.alertLevel))) return false;
+      put16(payload, reading.levelMm);
+      put16(payload + 2, static_cast<uint16_t>(reading.rateOfRiseMmPerMin));
+      put16(payload + 4, reading.rainfallTenthsMm);
+      payload[6] = static_cast<uint8_t>(reading.alertLevel);
+      payload[7] = reading.stormMode ? kReadingFlagStormMode : 0;
+      return true;
+    }
+    case PacketKind::Alert: {
+      const AlertPayload& alert = packet.alert;
+      if (!isAlertLevel(static_cast<uint8_t>(alert.alertLevel))) return false;
+      payload[0] = static_cast<uint8_t>(alert.alertLevel);
+      put16(payload + 1, alert.levelMm);
+      put16(payload + 3, static_cast<uint16_t>(alert.rateOfRiseMmPerMin));
+      return true;
+    }
+    case PacketKind::Acknowledgement: {
+      const AcknowledgementPayload& acknowledgement = packet.acknowledgement;
+      if (!isAlertLevel(static_cast<uint8_t>(acknowledgement.alertLevel))) return false;
+      put16(payload, acknowledgement.alertSender);
+      put32(payload + 2, acknowledgement.alertCounter);
+      payload[6] = static_cast<uint8_t>(acknowledgement.alertLevel);
+      return true;
+    }
+    case PacketKind::Heartbeat: {
+      const HeartbeatPayload& heartbeat = packet.heartbeat;
+      put16(payload, heartbeat.batteryMillivolts);
+      put16(payload + 2, static_cast<uint16_t>(heartbeat.signalStrengthDbm));
+      put16(payload + 4, heartbeat.lastLevelMm);
+      payload[6] = heartbeat.discardedReadings;
+      if (heartbeat.tamper) payload[7] |= kHeartbeatFlagTamper;
+      if (heartbeat.alertRefreshLost) payload[7] |= kHeartbeatFlagAlertRefreshLost;
+      if (heartbeat.hasLastLevel) payload[7] |= kHeartbeatFlagHasLastLevel;
+      return true;
+    }
+    case PacketKind::AllClear:
+      put16(payload, packet.allClear.wadiNode);
+      return true;
+    case PacketKind::Test:
+      return true;
   }
-  return 0;
+  return false;
+}
+
+// Fills in the payload for the kind byte. Returns false for a payload that makes no sense.
+bool readPayload(uint8_t kind, const uint8_t* payload, Packet& packet) {
+  switch (static_cast<PacketKind>(kind)) {
+    case PacketKind::Reading:
+      if (!isAlertLevel(payload[6])) return false;
+      packet.reading.levelMm = get16(payload);
+      packet.reading.rateOfRiseMmPerMin = static_cast<int16_t>(get16(payload + 2));
+      packet.reading.rainfallTenthsMm = get16(payload + 4);
+      packet.reading.alertLevel = static_cast<AlertLevel>(payload[6]);
+      packet.reading.stormMode = (payload[7] & kReadingFlagStormMode) != 0;
+      break;
+    case PacketKind::Alert:
+      if (!isAlertLevel(payload[0])) return false;
+      packet.alert.alertLevel = static_cast<AlertLevel>(payload[0]);
+      packet.alert.levelMm = get16(payload + 1);
+      packet.alert.rateOfRiseMmPerMin = static_cast<int16_t>(get16(payload + 3));
+      break;
+    case PacketKind::Acknowledgement:
+      if (!isAlertLevel(payload[6])) return false;
+      packet.acknowledgement.alertSender = get16(payload);
+      packet.acknowledgement.alertCounter = get32(payload + 2);
+      packet.acknowledgement.alertLevel = static_cast<AlertLevel>(payload[6]);
+      break;
+    case PacketKind::Heartbeat:
+      packet.heartbeat.batteryMillivolts = get16(payload);
+      packet.heartbeat.signalStrengthDbm = static_cast<int16_t>(get16(payload + 2));
+      packet.heartbeat.lastLevelMm = get16(payload + 4);
+      packet.heartbeat.discardedReadings = payload[6];
+      packet.heartbeat.tamper = (payload[7] & kHeartbeatFlagTamper) != 0;
+      packet.heartbeat.alertRefreshLost = (payload[7] & kHeartbeatFlagAlertRefreshLost) != 0;
+      packet.heartbeat.hasLastLevel = (payload[7] & kHeartbeatFlagHasLastLevel) != 0;
+      break;
+    case PacketKind::AllClear:
+      packet.allClear.wadiNode = get16(payload);
+      break;
+    case PacketKind::Test:
+      break;
+    default:
+      return false;
+  }
+  packet.kind = static_cast<PacketKind>(kind);
+  return true;
+}
+
+// Computes the authentication code of a frame's header and payload.
+void writeAuthCode(const SiteAuth& auth, const uint8_t* frame, uint8_t* authCode) {
+  uint8_t digest[kSha256DigestSize];
+  hmacSha256(auth.key, kSiteKeySize, frame, kAuthCodeOffset, digest);
+  std::memcpy(authCode, digest, kAuthCodeSize);
 }
 
 }  // namespace
 
-size_t encodePacket(const Packet& packet, uint8_t* buffer, size_t capacity) {
-  const size_t size = packetSize(packet.kind);
-  if (size == 0 || capacity < size) return 0;
-  buffer[0] = kProtocolVersion;
-  buffer[1] = static_cast<uint8_t>(packet.kind);
-  putUint16(buffer + 2, packet.sender);
-  uint8_t* body = buffer + kHeaderSize;
-  if (packet.kind == PacketKind::Alert) {
-    body[0] = static_cast<uint8_t>(packet.alertLevel);
-  } else {
-    const Heartbeat& heartbeat = packet.heartbeat;
-    putUint16(body, heartbeat.batteryMillivolts);
-    body[2] = static_cast<uint8_t>(heartbeat.signalStrengthDbm);
-    body[3] = static_cast<uint8_t>((heartbeat.tamper ? kHeartbeatFlagTamper : 0) |
-                                   (heartbeat.hasLastLevel ? kHeartbeatFlagHasLastLevel : 0));
-    putUint16(body + 4, static_cast<uint16_t>(heartbeat.lastLevelCm));
+PacketCodec::PacketCodec(const SiteAuth& auth, NodeId self, PersistentStorage& storage)
+    : auth_(auth), self_(self), storage_(storage), sendCounter_(0), sendCounterLoaded_(false) {
+  if (auth_.nodeCount > kMaxSiteNodes) auth_.nodeCount = kMaxSiteNodes;
+  for (size_t i = 0; i < kMaxSiteNodes; ++i) {
+    lastAccepted_[i] = 0;
+    lastAcceptedLoaded_[i] = false;
   }
-  return size;
 }
 
-bool decodePacket(const uint8_t* data, size_t length, Packet& packet) {
-  if (length < kHeaderSize) return false;
-  if (data[0] != kProtocolVersion) return false;
-  const uint8_t* body = data + kHeaderSize;
-  Packet decoded = Packet();
-  decoded.sender = getUint16(data + 2);
-  if (data[1] == static_cast<uint8_t>(PacketKind::Alert)) {
-    if (length != kAlertPacketSize) return false;
-    if (body[0] > static_cast<uint8_t>(AlertLevel::Evacuate)) return false;
-    decoded.kind = PacketKind::Alert;
-    decoded.alertLevel = static_cast<AlertLevel>(body[0]);
-  } else if (data[1] == static_cast<uint8_t>(PacketKind::Heartbeat)) {
-    if (length != kHeartbeatPacketSize) return false;
-    if ((body[3] & ~kHeartbeatKnownFlags) != 0) return false;
-    decoded.kind = PacketKind::Heartbeat;
-    decoded.heartbeat.batteryMillivolts = getUint16(body);
-    decoded.heartbeat.signalStrengthDbm = static_cast<int8_t>(body[2]);
-    decoded.heartbeat.tamper = (body[3] & kHeartbeatFlagTamper) != 0;
-    decoded.heartbeat.hasLastLevel = (body[3] & kHeartbeatFlagHasLastLevel) != 0;
-    decoded.heartbeat.lastLevelCm = static_cast<int16_t>(getUint16(body + 4));
-  } else {
-    return false;
+size_t PacketCodec::encode(Packet& packet, uint8_t* buffer, size_t capacity) {
+  if (capacity < kPacketSize) return 0;
+
+  uint8_t frame[kPacketSize];
+  if (!writePayload(packet, frame + kPayloadOffset)) return 0;
+
+  const uint32_t storedAt = storageKey(StorageRecord::SendCounter, self_);
+  if (!sendCounterLoaded_) {
+    uint32_t stored = 0;
+    if (storage_.load(storedAt, stored)) sendCounter_ = stored;
+    sendCounterLoaded_ = true;
   }
+  // A counter that wrapped around would be rejected as a replay, so it stops instead.
+  if (sendCounter_ == kCounterMax) return 0;
+  ++sendCounter_;
+  // Stored before the packet can go out: a restart must never reuse a counter.
+  storage_.store(storedAt, sendCounter_);
+
+  packet.sender = self_;
+  packet.counter = sendCounter_;
+  frame[kVersionOffset] = kProtocolVersion;
+  frame[kKindOffset] = static_cast<uint8_t>(packet.kind);
+  put16(frame + kSenderOffset, packet.sender);
+  put32(frame + kCounterOffset, packet.counter);
+  writeAuthCode(auth_, frame, frame + kAuthCodeOffset);
+
+  std::memcpy(buffer, frame, kPacketSize);
+  return kPacketSize;
+}
+
+bool PacketCodec::decode(const uint8_t* data, size_t length, Packet& packet) {
+  if (length != kPacketSize) return false;
+  if (data[kVersionOffset] != kProtocolVersion) return false;
+
+  uint8_t expected[kAuthCodeSize];
+  writeAuthCode(auth_, data, expected);
+  if (!constantTimeEqual(expected, data + kAuthCodeOffset, kAuthCodeSize)) return false;
+
+  // From here on the frame was made by someone holding the site key.
+  Packet decoded = Packet();
+  decoded.sender = get16(data + kSenderOffset);
+  decoded.counter = get32(data + kCounterOffset);
+  // A node never hears itself, so its own identifier on the air is an echo or a replay.
+  if (decoded.sender == self_) return false;
+  const int node = indexOfNode(decoded.sender);
+  if (node < 0) return false;
+  if (!readPayload(data[kKindOffset], data + kPayloadOffset, decoded)) return false;
+
+  const uint32_t storedAt = storageKey(StorageRecord::LastAcceptedCounter, decoded.sender);
+  if (!lastAcceptedLoaded_[node]) {
+    uint32_t stored = 0;
+    if (storage_.load(storedAt, stored)) lastAccepted_[node] = stored;
+    lastAcceptedLoaded_[node] = true;
+  }
+  if (decoded.counter <= lastAccepted_[node]) return false;
+  lastAccepted_[node] = decoded.counter;
+  storage_.store(storedAt, decoded.counter);
+
   packet = decoded;
   return true;
+}
+
+int PacketCodec::indexOfNode(NodeId node) const {
+  for (size_t i = 0; i < auth_.nodeCount; ++i) {
+    if (auth_.nodes[i] == node) return static_cast<int>(i);
+  }
+  return -1;
 }
 
 }  // namespace wadiwatch
