@@ -1,7 +1,8 @@
-"""The site file: which nodes exist, what they are called and where they sit on the map.
+"""The site file: which nodes exist, what they are called and where they sit on the map,
+and how often the site is expected to be heard from.
 
-Node identifiers must match the firmware site configuration. Thresholds and
-keys are not kept here.
+Node identifiers and intervals must match the firmware site configuration.
+Thresholds and keys are not kept here.
 """
 
 import json
@@ -43,6 +44,13 @@ class Site:
     positions_are_placeholders: bool
     gateway: Gateway
     nodes: tuple
+    # How often every node sends a heartbeat. Node health is judged against it.
+    heartbeat_interval_s: int
+    # How often a wadi node measures in dry mode: the longest gap between two
+    # gateway messages while nothing is happening.
+    dry_mode_interval_s: int
+    # How often a wadi node at Warning or above repeats its alert.
+    alert_refresh_interval_s: int
 
     @property
     def wadi_nodes(self):
@@ -60,6 +68,16 @@ class Site:
             if node.id == node_id:
                 return node.role
         return None
+
+
+INTERVALS = ("heartbeat_interval_s", "dry_mode_interval_s", "alert_refresh_interval_s")
+
+
+def _interval(raw, name, path):
+    value = raw.get(name)
+    if type(value) is not int or value <= 0:
+        raise SiteError(f"{path}: {name} must be a whole number of seconds greater than 0")
+    return value
 
 
 def load_site(path):
@@ -88,6 +106,7 @@ def load_site(path):
         positions_are_placeholders=bool(raw.get("positions_are_placeholders", False)),
         gateway=gateway,
         nodes=nodes,
+        **{name: _interval(raw, name, path) for name in INTERVALS},
     )
     _check(site, path)
     return site

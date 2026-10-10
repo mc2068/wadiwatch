@@ -8,9 +8,11 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="static/dashboard.css">
+  <link rel="stylesheet" href="static/health.css">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script defer src="static/dashboard.js"></script>
+  <script defer src="static/health.js"></script>
 </head>
 <body>
   <header class="bar">
@@ -21,6 +23,16 @@
     <p id="summary" class="summary summary--unknown" role="status" aria-live="polite">Waiting for data</p>
     <p id="connection" class="connection" role="status">Connecting</p>
   </header>
+
+  <!-- Age of the gateway's latest data. Turns into the stale-data warning. (health.js) -->
+  <div id="gateway-status" class="gateway-status gateway-status--waiting">
+    <p id="gateway-announcement" class="gateway-status__announcement" role="status" aria-live="assertive"></p>
+    <p class="gateway-status__age">
+      <strong id="gateway-status-title" class="gateway-status__title" hidden></strong>
+      <span id="gateway-status-text">Checking the gateway</span>
+    </p>
+    <ul id="health-flags" class="health-flags" aria-label="Nodes that need attention"></ul>
+  </div>
 
   <main class="layout">
     <section class="map" aria-label="Map of nodes coloured by alert level">
@@ -49,5 +61,35 @@
       </ul>
     </aside>
   </main>
+
+  <!-- Curves and node health. (health.js) -->
+  <section class="detail" aria-labelledby="curves-title">
+    <div class="detail__head">
+      <h2 id="curves-title">Water level and rate of rise</h2>
+      <div id="curve-periods" class="periods" role="group" aria-label="Period shown"></div>
+    </div>
+    <div id="curves" class="curves"></div>
+  </section>
+
+  <section id="health" class="detail" aria-labelledby="health-title">
+    <div class="detail__head">
+      <h2 id="health-title">Node health</h2>
+      <p id="health-rule" class="detail__note"></p>
+    </div>
+    <table class="health">
+      <thead>
+        <tr>
+          <th scope="col">Node</th>
+          <th scope="col">Status</th>
+          <th scope="col">Battery</th>
+          <th scope="col">Signal</th>
+          <th scope="col">Tamper switch</th>
+          <th scope="col">Discarded readings</th>
+          <th scope="col">Last heartbeat</th>
+        </tr>
+      </thead>
+      <tbody id="health-rows"></tbody>
+    </table>
+  </section>
 </body>
 </html>

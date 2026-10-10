@@ -1,6 +1,9 @@
 {
   "name": "Prototype site, Nabeul",
   "positions_are_placeholders": true,
+  "heartbeat_interval_s": 3600,
+  "dry_mode_interval_s": 900,
+  "alert_refresh_interval_s": 60,
   "gateway": {
     "id": 769,
     "name": "Gateway",
