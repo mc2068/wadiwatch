@@ -3,18 +3,22 @@
 
 #include "../esp32/esp_ports.h"
 #include "wadiwatch/siren_node.h"
+#include "wadiwatch/site_config.h"
 
 namespace {
 
-// Stands in for the siren driver until its adapter is written: reports to the serial port.
+// Stands in for the siren and strobe drivers until their adapter is written: reports to the
+// serial port.
 class SerialSirenOutput : public wadiwatch::SirenOutput {
  public:
   void setSiren(bool on) override { Serial.println(on ? "SIREN ON" : "SIREN OFF"); }
+  void setStrobe(bool on) override { Serial.println(on ? "STROBE ON" : "STROBE OFF"); }
 };
 
+EspClock espClock;
 UnconnectedRadio radio;
 SerialSirenOutput siren;
-wadiwatch::SirenNode node(radio, siren);
+wadiwatch::SirenNode node(wadiwatch::prototypeSite().sirenNode, espClock, radio, siren);
 
 }  // namespace
 

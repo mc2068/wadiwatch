@@ -30,10 +30,13 @@ class Radio {
   virtual size_t receive(uint8_t* buffer, size_t capacity) = 0;
 };
 
+// The siren and the strobe beside it. The siren node core times the siren
+// pattern itself and switches the siren on and off through this port.
 class SirenOutput {
  public:
   virtual ~SirenOutput() = default;
   virtual void setSiren(bool on) = 0;
+  virtual void setStrobe(bool on) = 0;
 };
 
 }  // namespace wadiwatch

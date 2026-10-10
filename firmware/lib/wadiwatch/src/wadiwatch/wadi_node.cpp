@@ -1,5 +1,7 @@
 #include "wadiwatch/wadi_node.h"
 
+#include "wadiwatch/alert_engine.h"
+
 namespace wadiwatch {
 
 WadiNode::WadiNode(const WadiNodeConfig& config, Clock& clock, LevelSensor& sensor, Radio& radio)
@@ -17,8 +19,12 @@ void WadiNode::measure() {
   if (!sensor_.readDistanceCm(distanceCm)) return;
 
   const float levelCm = config_.mountingHeightCm - distanceCm;
-  if (levelCm >= config_.warningLevelCm && alertLevel_ < AlertLevel::Warning) {
-    alertLevel_ = AlertLevel::Warning;
+  // Rate of rise, rainfall intensity and the upstream node are not measured yet.
+  const AlertInputs inputs = {levelCm, 0.0f, 0.0f, AlertLevel::None};
+  const AlertLevel evaluated = evaluateAlertLevel(inputs, config_.alertThresholds);
+  // Alert levels only escalate automatically; lowering one takes an all clear.
+  if (evaluated > alertLevel_) {
+    alertLevel_ = evaluated;
     sendAlert();
   }
 }
