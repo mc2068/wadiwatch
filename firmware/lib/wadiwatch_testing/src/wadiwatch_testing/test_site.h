@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "wadiwatch_testing/fakes.h"
+#include "wadiwatch/packet.h"
 #include "wadiwatch/siren_node.h"
 #include "wadiwatch/site_config.h"
 #include "wadiwatch/wadi_node.h"
@@ -11,26 +12,66 @@
 namespace wadiwatch {
 namespace testing {
 
+// What a bystander hears from the siren over one period of the intermittent pattern.
+enum class SirenSound { Silent, Intermittent, Continuous };
+
 struct TestSite {
-  SiteConfig config = prototypeSite();
+  // Simulated time advances in steps of this size.
+  static constexpr uint64_t kStepMs = 1000;
+
+  SiteConfig config;
   FakeClock clock;
   Air air;
   FakeLevelSensor levelSensor{config.wadiNode.mountingHeightCm};
   FakeSirenOutput siren;
   WadiNode wadiNode{config.wadiNode, clock, levelSensor, air.join()};
-  SirenNode sirenNode{air.join(), siren};
+  SirenNode sirenNode{config.sirenNode, clock, air.join(), siren};
 
-  // Advances simulated time one second at a time, ticking every device.
+  TestSite() : TestSite(prototypeSite()) {}
+  explicit TestSite(const SiteConfig& siteConfig) : config(siteConfig) {}
+
+  // Advances simulated time one step at a time, ticking every device.
   void runMs(uint64_t durationMs) {
-    const uint64_t stepMs = 1000;
-    for (uint64_t elapsed = 0; elapsed < durationMs; elapsed += stepMs) {
-      clock.advanceMs(stepMs);
+    for (uint64_t elapsed = 0; elapsed < durationMs; elapsed += kStepMs) {
+      clock.advanceMs(kStepMs);
       wadiNode.tick();
       sirenNode.tick();
     }
   }
 
   void runMinutes(uint64_t minutes) { runMs(minutes * 60 * 1000); }
+
+  // The alert level carried by the most recent alert packet put on the air,
+  // or None when no alert has been transmitted.
+  AlertLevel latestAlertOnAir() const {
+    const std::vector<Frame>& frames = air.transmitted();
+    for (size_t i = frames.size(); i > 0; --i) {
+      const Frame& frame = frames[i - 1];
+      Packet packet;
+      if (!decodePacket(frame.data(), frame.size(), packet)) continue;
+      if (packet.kind == PacketKind::Alert) return packet.alertLevel;
+    }
+    return AlertLevel::None;
+  }
+
+  // Runs the site for one period of the intermittent pattern and names what was heard.
+  // Needs the pattern's on and off times to be at least one step long.
+  SirenSound listenToSiren() {
+    const uint64_t periodMs =
+        static_cast<uint64_t>(config.sirenNode.intermittentOnMs) + config.sirenNode.intermittentOffMs;
+    bool heardSounding = false;
+    bool heardSilence = false;
+    for (uint64_t elapsed = 0; elapsed < periodMs; elapsed += kStepMs) {
+      runMs(kStepMs);
+      if (siren.isOn()) {
+        heardSounding = true;
+      } else {
+        heardSilence = true;
+      }
+    }
+    if (!heardSounding) return SirenSound::Silent;
+    return heardSilence ? SirenSound::Intermittent : SirenSound::Continuous;
+  }
 };
 
 }  // namespace testing

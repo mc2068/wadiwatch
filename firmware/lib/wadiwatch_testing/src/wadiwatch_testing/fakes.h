@@ -44,10 +44,16 @@ class FakeLevelSensor : public LevelSensor {
 class FakeSirenOutput : public SirenOutput {
  public:
   void setSiren(bool on) override { on_ = on; }
+  void setStrobe(bool on) override { strobeOn_ = on; }
+
+  // Whether the siren is sounding at this instant. During the intermittent
+  // pattern this comes and goes; TestSite::listenToSiren() names the pattern.
   bool isOn() const { return on_; }
+  bool isStrobeOn() const { return strobeOn_; }
 
  private:
   bool on_ = false;
+  bool strobeOn_ = false;
 };
 
 class Air;

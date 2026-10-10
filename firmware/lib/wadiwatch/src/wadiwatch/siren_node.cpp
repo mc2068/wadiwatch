@@ -1,20 +1,54 @@
 #include "wadiwatch/siren_node.h"
 
-#include "wadiwatch/packet.h"
-
 namespace wadiwatch {
 
-SirenNode::SirenNode(Radio& radio, SirenOutput& siren) : radio_(radio), siren_(siren) {}
+SirenNode::SirenNode(const SirenNodeConfig& config, Clock& clock, Radio& radio, SirenOutput& output)
+    : config_(config), clock_(clock), radio_(radio), output_(output) {}
 
 void SirenNode::tick() {
+  const uint64_t nowMs = clock_.nowMs();
+  handleReceivedFrames(nowMs);
+  driveOutput(nowMs);
+}
+
+void SirenNode::handleReceivedFrames(uint64_t nowMs) {
   uint8_t frame[kMaxPacketSize];
   size_t length;
   while ((length = radio_.receive(frame, sizeof(frame))) > 0) {
     Packet packet;
     if (!decodePacket(frame, length, packet)) continue;
-    if (packet.kind == PacketKind::Alert && packet.alertLevel >= AlertLevel::Warning) {
-      siren_.setSiren(true);
-    }
+    if (packet.kind != PacketKind::Alert) continue;
+    // A repeat of the alert in force must not restart the pattern, and a lower
+    // alert level must not quieten the siren.
+    if (packet.alertLevel <= alertLevel_) continue;
+    alertLevel_ = packet.alertLevel;
+    if (alertLevel_ == AlertLevel::Warning) intermittentStartedAtMs_ = nowMs;
+  }
+}
+
+void SirenNode::driveOutput(uint64_t nowMs) {
+  bool siren = false;
+  bool strobe = false;
+  if (alertLevel_ == AlertLevel::Evacuate) {
+    siren = true;
+    strobe = true;
+  } else if (alertLevel_ == AlertLevel::Warning) {
+    strobe = true;
+    const uint64_t periodMs =
+        static_cast<uint64_t>(config_.intermittentOnMs) + config_.intermittentOffMs;
+    // The pattern starts with the siren sounding. A pattern with no duration
+    // configured must not leave a Warning silent.
+    siren = periodMs == 0 ||
+            (nowMs - intermittentStartedAtMs_) % periodMs < config_.intermittentOnMs;
+  }
+
+  if (siren != sirenOn_) {
+    sirenOn_ = siren;
+    output_.setSiren(siren);
+  }
+  if (strobe != strobeOn_) {
+    strobeOn_ = strobe;
+    output_.setStrobe(strobe);
   }
 }
 
