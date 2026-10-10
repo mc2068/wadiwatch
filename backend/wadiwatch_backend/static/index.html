@@ -20,7 +20,16 @@
     </div>
     <p id="summary" class="summary summary--unknown" role="status" aria-live="polite">Waiting for data</p>
     <p id="connection" class="connection" role="status">Connecting</p>
+    <!-- Officer sign-in (alert_log.js) -->
+    <div class="officer">
+      <span id="officer-name" class="officer__name" hidden></span>
+      <button id="sign-in-open" type="button" class="officer__button">Officer sign-in</button>
+      <button id="sign-out" type="button" class="officer__button" hidden>Sign out</button>
+    </div>
   </header>
+
+  <!-- Stays on screen while an Evacuate alert has no officer acknowledgement (alert_log.js) -->
+  <div id="acknowledgement-requests" class="ack-requests" role="alert" hidden></div>
 
   <main class="layout">
     <section class="map" aria-label="Map of nodes coloured by alert level">
@@ -49,5 +58,49 @@
       </ul>
     </aside>
   </main>
+
+  <!-- Alert log, sign-in and acknowledgement: alert_log.js and alert_log.css -->
+  <section id="alert-log" class="alert-log" aria-labelledby="alert-log-title">
+    <div class="alert-log__head">
+      <h2 id="alert-log-title">Alert log</h2>
+      <p class="alert-log__about">Every alert, test and all clear. Open to everyone; officers sign in to acknowledge an alert.</p>
+      <p id="alert-log-status" class="alert-log__status" role="status"></p>
+    </div>
+    <table class="alert-log__table">
+      <thead>
+        <tr>
+          <th scope="col">Time</th>
+          <th scope="col">Entry</th>
+          <th scope="col">Node</th>
+          <th scope="col">Siren nodes</th>
+          <th scope="col">Officer</th>
+        </tr>
+      </thead>
+      <tbody id="alert-log-entries">
+        <tr><td colspan="5" class="alert-log__empty">Loading the alert log</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <dialog id="sign-in" class="sign-in" aria-labelledby="sign-in-title">
+    <form id="sign-in-form" class="sign-in__form" method="dialog">
+      <h2 id="sign-in-title">Officer sign-in</h2>
+      <p id="sign-in-note" class="sign-in__note">Sign in to acknowledge alerts.</p>
+      <label for="sign-in-name">Account name</label>
+      <input id="sign-in-name" name="name" type="text" required maxlength="32"
+             autocomplete="username" autocapitalize="none" spellcheck="false">
+      <label for="sign-in-password">Password</label>
+      <input id="sign-in-password" name="password" type="password" required maxlength="128"
+             autocomplete="current-password">
+      <p id="sign-in-error" class="sign-in__error" role="alert" hidden></p>
+      <div class="sign-in__actions">
+        <button id="sign-in-cancel" type="button" class="sign-in__cancel">Cancel</button>
+        <button id="sign-in-submit" type="submit" class="sign-in__submit">Sign in</button>
+      </div>
+    </form>
+  </dialog>
+
+  <link rel="stylesheet" href="static/alert_log.css">
+  <script defer src="static/alert_log.js"></script>
 </body>
 </html>
