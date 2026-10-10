@@ -80,11 +80,19 @@ SiteConfig makePrototypeSite() {
               /* windowMs */ 5u * kMinuteMs,
           },
           /* heartbeatIntervalMs */ 60u * kMinuteMs,
+          /* alertRepeat */ {
+              /* transmissions */ 3,
+              /* minSpacingMs */ 1000u,
+              /* maxSpacingMs */ 4000u,
+          },
       },
       /* sirenNode */ {
           /* id */ kSirenNodeId,
           /* intermittentOnMs */ 2000u,
           /* intermittentOffMs */ 2000u,
+          /* alertRefreshTimeoutMs */ 30u * kMinuteMs,
+          /* testDurationMs */ 30u * 1000u,
+          /* heartbeatIntervalMs */ 60u * kMinuteMs,
       },
       /* gateway */ {
           /* id */ kGatewayNodeId,

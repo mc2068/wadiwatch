@@ -1,11 +1,13 @@
 // A whole site on a PC: the device cores wired to fake ports and joined by an in-memory radio.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 #include "wadiwatch_testing/fakes.h"
+#include "wadiwatch_testing/scripted_node.h"
 #include "wadiwatch/gateway.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/recipients.h"
@@ -32,7 +34,10 @@ struct TestSite {
   FakeTemperatureSensor temperatureSensor;
   FakeRainGauge rainGauge{config.wadiNode.rain.mmPerTip, wadiNodeSleep};
   FakeNodeHealth wadiNodeHealth;
+  FakeRandom wadiNodeRandom;
   FakeSirenOutput siren;
+  FakeNodeHealth sirenNodeHealth;
+  FakeButton sirenButton;
   FakeStorage wadiNodeStorage;
   FakeStorage sirenNodeStorage;
   FakeStorage gatewayStorage;
@@ -56,7 +61,7 @@ struct TestSite {
   void runMs(uint64_t durationMs) {
     for (uint64_t elapsed = 0; elapsed < durationMs; elapsed += kStepMs) {
       clock.advanceMs(kStepMs);
-      if (!wadiNodeSleep.isAsleep()) wadiNode->tick();
+      if (wadiNode && !wadiNodeSleep.isAsleep()) wadiNode->tick();
       sirenNode->tick();
       if (gatewayPluggedIn_) gateway->tick();
     }
@@ -74,13 +79,8 @@ struct TestSite {
   // the codec. A frame the codec refuses is not listed, and a transmission
   // repeated byte for byte is listed once.
   std::vector<Packet> packetsOnAir() const {
-    FakeStorage listenerStorage;
-    PacketCodec listener(config.auth, nodeIdOutsideSite(), listenerStorage);
     std::vector<Packet> packets;
-    for (const Frame& frame : air.transmitted()) {
-      Packet packet;
-      if (listener.decode(frame.data(), frame.size(), packet)) packets.push_back(packet);
-    }
+    for (const Heard& heard : heardOnAir()) packets.push_back(heard.packet);
     return packets;
   }
 
@@ -93,20 +93,34 @@ struct TestSite {
     return packets;
   }
 
-  // The frames behind packetsOnAir(kind), byte for byte as they were transmitted:
-  // what a third radio listening in would have recorded. For scenarios that
-  // alter or replay a genuine frame.
+  // The packets one node has sent, among packetsOnAir(). Every device of the site
+  // transmits (heartbeats, acknowledgements, test packets), so a scenario about
+  // one device's traffic asks for that device's packets.
+  std::vector<Packet> packetsOnAirFrom(NodeId sender) const {
+    std::vector<Packet> packets;
+    for (const Packet& packet : packetsOnAir()) {
+      if (packet.sender == sender) packets.push_back(packet);
+    }
+    return packets;
+  }
+
+  // The frames that carried the packets of one kind, oldest first, each as it was
+  // first transmitted: what a recorder beside the site would have on tape. For
+  // scenarios that play a frame back or count its transmissions; to read what a
+  // frame says, use packetsOnAir().
   std::vector<Frame> framesOnAir(PacketKind kind) const {
-    FakeStorage listenerStorage;
-    PacketCodec listener(config.auth, nodeIdOutsideSite(), listenerStorage);
     std::vector<Frame> frames;
-    for (const Frame& frame : air.transmitted()) {
-      Packet packet;
-      if (listener.decode(frame.data(), frame.size(), packet) && packet.kind == kind) {
-        frames.push_back(frame);
-      }
+    for (const Heard& heard : heardOnAir()) {
+      if (heard.packet.kind == kind) frames.push_back(heard.frame);
     }
     return frames;
+  }
+
+  // How many times the site's devices have transmitted exactly this frame,
+  // lost transmissions included.
+  size_t timesTransmitted(const Frame& frame) const {
+    return static_cast<size_t>(
+        std::count(air.transmitted().begin(), air.transmitted().end(), frame));
   }
 
   // The alert level carried by the most recent alert packet put on the air,
@@ -147,10 +161,15 @@ struct TestSite {
 
   // Power-cycles a device: its core starts again from nothing, awake, with the
   // same persistent storage and the same hardware around it.
+  // After unplugWadiNode() this is the power coming back.
   void restartWadiNode() {
     wadiNodeSleep.wake();
     wadiNode = makeWadiNode();
   }
+
+  // The wadi node loses power, or is carried off by the flood: from now on it
+  // measures nothing and transmits nothing.
+  void unplugWadiNode() { wadiNode.reset(); }
 
   void restartSirenNode() {
     siren = FakeSirenOutput();  // outputs are off after a reset
@@ -162,15 +181,33 @@ struct TestSite {
   void restartGateway() { gateway = makeGateway(); }
 
  private:
+  struct Heard {
+    Frame frame;
+    Packet packet;
+  };
+
+  std::vector<Heard> heardOnAir() const {
+    FakeStorage listenerStorage;
+    PacketCodec listener(config.auth, nodeIdOutsideSite(), listenerStorage);
+    std::vector<Heard> heard;
+    for (const Frame& frame : air.transmitted()) {
+      Packet packet;
+      if (listener.decode(frame.data(), frame.size(), packet)) heard.push_back({frame, packet});
+    }
+    return heard;
+  }
+
   std::unique_ptr<WadiNode> makeWadiNode() {
     return std::unique_ptr<WadiNode>(
         new WadiNode(config.wadiNode, config.auth, clock, wadiNodeSleep, levelSensor, rainGauge,
-                     wadiNodeHealth, wadiNodeRadio, wadiNodeStorage, &temperatureSensor));
+                     wadiNodeHealth, wadiNodeRadio, wadiNodeStorage, wadiNodeRandom,
+                     &temperatureSensor));
   }
 
   std::unique_ptr<SirenNode> makeSirenNode() {
-    return std::unique_ptr<SirenNode>(new SirenNode(config.sirenNode, config.auth, clock,
-                                                    sirenNodeRadio, siren, sirenNodeStorage));
+    return std::unique_ptr<SirenNode>(
+        new SirenNode(config.sirenNode, config.auth, clock, sirenNodeRadio, siren,
+                      sirenNodeStorage, sirenNodeHealth, sirenButton));
   }
 
   std::unique_ptr<Gateway> makeGateway() {

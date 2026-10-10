@@ -14,6 +14,7 @@ using wadiwatch::PacketKind;
 using wadiwatch::SiteAuth;
 using wadiwatch::testing::FakeStorage;
 using wadiwatch::testing::Frame;
+using wadiwatch::testing::ScriptedGateway;
 using wadiwatch::testing::SirenSound;
 using wadiwatch::testing::TestSite;
 
@@ -108,14 +109,19 @@ static void test_signed_alert_from_a_node_outside_the_site_does_not_sound_the_si
 }
 
 static void test_replayed_alert_does_not_sound_the_siren() {
-  TestSite site;
+  ScriptedGateway gateway;
+  TestSite site(gateway.config);
   floodWadi(site);
   TEST_ASSERT_TRUE(sirenSounds(site));
   const Frame recorded = site.framesOnAir(PacketKind::Alert).back();
 
-  // The siren node is power-cycled, which silences it, and remembers what it accepted.
-  site.restartSirenNode();
+  // The wadi node goes off the air, so that nothing but the recording can sound the
+  // siren again, and the event ends with an all clear, which silences the siren.
+  site.unplugWadiNode();
+  site.air.inject(gateway.allClear(site.config.wadiNode.id));
   TEST_ASSERT_FALSE(sirenSounds(site));
+  // A power cycle does not make the siren node forget what it accepted.
+  site.restartSirenNode();
 
   site.air.inject(recorded);
 
@@ -123,14 +129,18 @@ static void test_replayed_alert_does_not_sound_the_siren() {
 }
 
 static void test_wadi_node_restarted_during_a_flood_is_still_believed() {
-  TestSite site;
+  ScriptedGateway gateway;
+  TestSite site(gateway.config);
   floodWadi(site);
   TEST_ASSERT_TRUE(sirenSounds(site));
-  site.restartSirenNode();
+  // The wadi node loses power and, while it is off, an all clear silences the siren.
+  site.unplugWadiNode();
+  site.air.inject(gateway.allClear(site.config.wadiNode.id));
   TEST_ASSERT_FALSE(sirenSounds(site));
 
-  // The wadi node restarts, finds the wadi still in flood and raises its alert again.
-  // The siren node accepts it only if the counter carried on from before the restart.
+  // Power returns: the wadi node restarts, finds the wadi still in flood and raises
+  // its alert again. The siren node accepts it only if the counter carried on from
+  // before the restart.
   site.restartWadiNode();
   floodWadi(site);
 

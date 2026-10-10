@@ -1,4 +1,5 @@
-// Tests of the test harness itself: the in-memory radio and the fake clock.
+// Tests of the test harness itself: the in-memory radio, the fake clock and the
+// scripted gateway.
 #include <chrono>
 
 #include <unity.h>
@@ -8,6 +9,7 @@
 using wadiwatch::testing::Air;
 using wadiwatch::testing::Frame;
 using wadiwatch::testing::InMemoryRadio;
+using wadiwatch::testing::ScriptedGateway;
 using wadiwatch::testing::TestSite;
 
 void setUp() {}
@@ -73,11 +75,43 @@ static void test_a_simulated_day_runs_in_under_a_second() {
   TEST_ASSERT_EQUAL_UINT64(24ull * 60 * 60 * 1000, site.clock.nowMs());
 }
 
+static bool isNodeOfTheSite(const wadiwatch::SiteAuth& auth, wadiwatch::NodeId node) {
+  for (size_t i = 0; i < auth.nodeCount; ++i) {
+    if (auth.nodes[i] == node) return true;
+  }
+  return false;
+}
+
+// The scripted gateway sends the all clear that the gateway core cannot send yet.
+// It stands beside the site's gateway, not in its place: were it to borrow that
+// identifier, its packet counter would run against the core's own.
+static void test_the_scripted_gateway_is_a_node_of_its_own_beside_the_site_s_gateway() {
+  ScriptedGateway scripted;
+  TestSite site(scripted.config);
+
+  TEST_ASSERT_TRUE(scripted.id != site.config.gateway.id);
+  TEST_ASSERT_TRUE(scripted.id != site.config.wadiNode.id);
+  TEST_ASSERT_TRUE(scripted.id != site.config.sirenNode.id);
+  TEST_ASSERT_TRUE(isNodeOfTheSite(site.config.auth, scripted.id));
+  TEST_ASSERT_TRUE(isNodeOfTheSite(site.config.auth, site.config.gateway.id));
+  TEST_ASSERT_FALSE(isNodeOfTheSite(site.config.auth, site.nodeIdOutsideSite()));
+
+  // Its all clear carries its own identifier and is accepted by a listener of the site.
+  wadiwatch::testing::FakeStorage listenerStorage;
+  wadiwatch::PacketCodec listener(site.config.auth, site.nodeIdOutsideSite(), listenerStorage);
+  const Frame allClear = scripted.allClear(site.config.wadiNode.id);
+  wadiwatch::Packet packet;
+  TEST_ASSERT_TRUE(listener.decode(allClear.data(), allClear.size(), packet));
+  TEST_ASSERT_EQUAL_UINT16(scripted.id, packet.sender);
+  TEST_ASSERT_EQUAL_UINT16(site.config.wadiNode.id, packet.allClear.wadiNode);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_radio_delivers_a_frame_to_the_other_radios_but_not_the_sender);
   RUN_TEST(test_radio_drops_the_requested_number_of_frames);
   RUN_TEST(test_radio_delivers_an_injected_frame_to_every_radio);
   RUN_TEST(test_a_simulated_day_runs_in_under_a_second);
+  RUN_TEST(test_the_scripted_gateway_is_a_node_of_its_own_beside_the_site_s_gateway);
   return UNITY_END();
 }
