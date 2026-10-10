@@ -14,13 +14,6 @@
   --grid-zero: #9aa6ae;
 }
 
-/* The page scrolls: the map and the node list keep the first screen, the
-   curves and node health follow below. (dashboard.css fills the window with
-   the map; these three rules are the only ones here that change it.) */
-html, body { height: auto; }
-body { min-height: 100vh; }
-.layout { flex: none; height: clamp(380px, 64vh, 760px); }
-
 /* Gateway status: a quiet line while data is current, a warning when it is not. */
 
 .gateway-status {
@@ -220,9 +213,6 @@ a.flag:hover, a.flag:focus-visible { outline: 2px solid var(--fault); outline-of
 .health__value--attention { font-weight: 700; color: var(--fault); }
 
 @media (max-width: 800px) {
-  /* One column: the map above the node list, each as tall as it needs. */
-  .layout { height: auto; }
-
   .gateway-status, .detail { padding-left: 14px; padding-right: 14px; }
   .curves { grid-template-columns: 1fr; }
 

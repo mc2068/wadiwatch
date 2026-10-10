@@ -16,10 +16,12 @@
 
 * { box-sizing: border-box; }
 
-html, body { height: 100%; }
-
+/* The page scrolls as one column: the top bar, the Evacuate request and the
+   gateway status, then the map with the node list on the first screen, then
+   one section after another (curves, node health, alert log). */
 body {
   margin: 0;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -65,8 +67,8 @@ ul { list-style: none; }
 /* Map and side panel */
 
 .layout {
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  height: clamp(380px, 64vh, 760px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
 }
@@ -207,7 +209,8 @@ ul { list-style: none; }
 .node-label b { text-transform: uppercase; letter-spacing: 0.04em; }
 
 @media (max-width: 800px) {
-  .layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+  /* One column: the map above the node list, each as tall as it needs. */
+  .layout { height: auto; grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   .panel { border-left: 0; border-top: 1px solid var(--line); }
   .bar { flex-wrap: wrap; gap: 8px 16px; }
   .connection { min-width: 0; }

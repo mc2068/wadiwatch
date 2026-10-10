@@ -80,6 +80,14 @@ class Reader:
             return None
         return dict(json.loads(row[1]), id=row[0])
 
+    def in_arrival_order(self, kinds):
+        """Every stored message of these kinds, oldest first (the alert log is built from them)."""
+        marks = ", ".join("?" for _ in kinds)
+        rows = self._connection.execute(
+            f"SELECT id, body FROM messages WHERE kind IN ({marks}) ORDER BY id", tuple(kinds)
+        )
+        return [dict(json.loads(body), id=row_id) for row_id, body in rows]
+
     def latest_from(self, node, kind=None):
         """The last message this node sent, optionally of one kind."""
         if kind is None:

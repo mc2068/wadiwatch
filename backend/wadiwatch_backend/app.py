@@ -10,15 +10,17 @@ from fastapi.staticfiles import StaticFiles
 
 from .backend import REJECTED
 from .health_api import health_router
+from .officer_api import add_officer_routes
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app(backend, uplink=None):
+def create_app(backend, uplink=None, secure_cookies=False):
     """Build the web application over a Backend.
 
     `uplink`, if given, is started and stopped with the application (the MQTT
-    subscriber in production; nothing in tests).
+    subscriber in production; nothing in tests). `secure_cookies` marks the
+    officers' session cookie for HTTPS only.
     """
 
     @asynccontextmanager
@@ -32,6 +34,8 @@ def create_app(backend, uplink=None):
                 uplink.stop()
 
     app = FastAPI(title="WadiWatch backend", lifespan=lifespan)
+    # Alert log, sign-in and acknowledgement (ticket #13) are in officer_api.py.
+    add_officer_routes(app, backend, secure_cookies=secure_cookies)
 
     @app.get("/api/nodes")
     def nodes():

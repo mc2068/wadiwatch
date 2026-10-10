@@ -72,7 +72,7 @@ The gateway sends SMS to the registered recipients, for alerts it accepts by the
 
 ## Backend and dashboard
 
-The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level, the water level and rate-of-rise curves of each wadi node, node health, and the age of the gateway's latest data. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests and the replay tool feed messages in.
+The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level, the water level and rate-of-rise curves of each wadi node, node health, the age of the gateway's latest data, and the alert log. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests and the replay tool feed messages in.
 
 Setup, once (Python 3.10 or later):
 
@@ -111,6 +111,32 @@ python -m wadiwatch_backend.replay --instant    # all at once, as an event that 
 ```
 
 The scenario (`backend/scenarios/flood_demo.jsonl`) is synthetic until there is hardware to record from: two wadi nodes rise through Watch and Warning, the downstream node reaches Evacuate by upstream confirmation, the siren node acknowledges, and an all clear ends the event.
+
+### Alert log and officer sign-in
+
+The alert log at the bottom of the dashboard lists every alert, test and all clear, newest first, and is open to anyone who can open the dashboard. For each alert it shows which siren nodes acknowledged it and whether an officer has. One alert entry is one change of alert level at one wadi node; the refresh a node sends every minute does not add entries.
+
+Officers sign in to acknowledge an alert. While an Evacuate alert is in force and no officer has acknowledged it, the dashboard keeps a request for acknowledgement at the top of the page. The log shows everyone that an alert was acknowledged and when; the officer's account name is shown only to signed-in officers.
+
+Sign-in uses test accounts. Create them with the seed step, once, and again whenever the database file has been deleted:
+
+```bash
+cd backend
+python -m wadiwatch_backend.seed
+```
+
+The seed step creates two accounts, `officer1` and `officer2`, with a generated password each, and writes the passwords to `backend/data/officers.local.json`. It prints the account names and the path, never the passwords: open the file to read them. Git ignores that file (all of `backend/data/`, and any `*.local.json`); keep it on the machine that runs the backend, and never put a password in the repository, an issue or a message.
+
+To use other account names or passwords, edit the file (one JSON object, account name to password, passwords of at least 12 characters) and run the seed step again. Account names are what the alert log shows as "who acknowledged", so use role names, not people's names. The seed step can run while the backend is running, and `--db` and `--credentials` point it at another database or file.
+
+How sign-in is protected:
+
+- Passwords are stored only as salted scrypt hashes.
+- A session is kept on the server and lasts 12 hours; the browser holds a random session cookie that scripts cannot read (`HttpOnly`) and that other sites cannot make the browser send (`SameSite=Strict`).
+- Requests that change something (acknowledge, sign out) must also carry the session's CSRF token, and are refused if the browser says they come from another site.
+- Over HTTPS, set `WADIWATCH_SECURE_COOKIES=1` so the cookie is never sent over plain HTTP. A reverse proxy in front of the backend must pass the `Host` header through unchanged.
+
+There is no limit on sign-in attempts and no way to remove an account except by deleting the database: enough for test accounts on a prototype, not for a deployment.
 
 Settings are environment variables, listed in `backend/wadiwatch_backend/__main__.py`. Two matter most:
 

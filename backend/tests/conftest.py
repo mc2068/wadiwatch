@@ -16,6 +16,9 @@ from wadiwatch_backend.backend import Backend
 from wadiwatch_backend.contract import CONTRACT_VERSION
 from wadiwatch_backend.site import DEFAULT_SITE_FILE, load_site
 
+# Fixtures for sign-in and the alert log (visitor, officer, signed_in, ...) are in officer_support.py.
+pytest_plugins = ["officer_support"]
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_EXAMPLES = REPO_ROOT / "docs" / "gateway-contract"
 

@@ -5,7 +5,9 @@ import time
 from dataclasses import dataclass
 
 from . import health
+from .alert_log import ALERT, KINDS as ALERT_LOG_KINDS, build_alert_log
 from .contract import ALERT_LEVELS, WADI_NODE, ContractError, parse_message
+from .officers import Officers
 from .store import MessageStore
 
 log = logging.getLogger("wadiwatch.backend")
@@ -32,14 +34,21 @@ class EmptyPeriod(ValueError):
     """The period ends before it starts."""
 
 
+class UnknownAlert(LookupError):
+    """No alert entry of the alert log has this id."""
+
+
 class Backend:
     def __init__(self, db_path, site, clock=time.time):
         self.site = site
         self._store = MessageStore(db_path)
         self._clock = clock
+        # Accounts, sessions and officer acknowledgements (ticket #13).
+        self.officers = Officers(db_path, clock)
 
     def close(self):
         self._store.close()
+        self.officers.close()
 
     def ingest(self, payload):
         """Take one gateway message exactly as it came off the uplink.
@@ -56,6 +65,31 @@ class Backend:
         if self._store.add(message, received_at=self._clock()):
             return IngestResult(STORED)
         return IngestResult(DUPLICATE)
+
+    # Alert log and officer acknowledgement (ticket #13). The rules are in alert_log.py.
+
+    def alert_log(self, show_officers=False):
+        """Every alert, test and all clear, newest first.
+
+        Officers' names are left out unless `show_officers` is set.
+        """
+        with self._store.reader() as reader:
+            messages = reader.in_arrival_order(ALERT_LOG_KINDS)
+        return build_alert_log(
+            messages, self.site, self.officers.acknowledgements(), show_officers
+        )
+
+    def acknowledge_alert(self, alert_id, officer):
+        """Record that `officer` (an account name) took charge of this alert.
+
+        `alert_id` is the `id` of an alert entry of the alert log. Raises
+        UnknownAlert for anything else. The first acknowledgement stands.
+        """
+        if not any(
+            entry["id"] == alert_id and entry["type"] == ALERT for entry in self.alert_log()
+        ):
+            raise UnknownAlert(alert_id)
+        return self.officers.acknowledge(alert_id, officer)
 
     def nodes(self):
         """Every configured node with its latest level and current alert level."""
