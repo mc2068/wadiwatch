@@ -3,3 +3,6 @@ __pycache__/
 report/build/out/
 *.tmp
 .claude/worktrees/
+.venv/
+.pytest_cache/
+backend/data/

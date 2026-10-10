@@ -1,0 +1,66 @@
+"""The HTTP endpoint and the MQTT subscriber are thin adapters over one ingest function."""
+
+import json
+from types import SimpleNamespace
+
+from wadiwatch_backend.mqtt import MqttUplink
+
+
+def post(harness, payload):
+    return harness.client.post("/api/ingest", content=payload)
+
+
+def test_http_ingest_stores_a_message(harness, upstream):
+    message = harness.message("reading", upstream.id, level_cm=73.5, rise_cm_min=2.5)
+
+    response = post(harness, json.dumps(message))
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "stored"}
+    assert harness.nodes()[upstream.id]["level_cm"] == 73.5
+
+
+def test_http_ingest_reports_a_duplicate_without_error(harness, upstream):
+    payload = json.dumps(harness.message("alert", upstream.id, alert_level="watch"))
+    post(harness, payload)
+
+    response = post(harness, payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "duplicate"}
+
+
+def test_http_ingest_refuses_a_malformed_message(harness, upstream):
+    before = harness.nodes()
+
+    response = post(harness, '{"kind": "reading"')
+
+    assert response.status_code == 400
+    assert response.json()["status"] == "rejected"
+    assert response.json()["error"]
+    assert harness.nodes() == before
+
+
+def mqtt_message(payload):
+    return SimpleNamespace(topic="wadiwatch/up", payload=payload)
+
+
+def test_mqtt_message_is_ingested(harness, upstream):
+    uplink = MqttUplink(harness.backend.ingest, host="broker.invalid")
+    message = harness.message("alert", upstream.id, alert_level="evacuate")
+
+    uplink.on_message(None, None, mqtt_message(json.dumps(message).encode()))
+
+    assert harness.nodes()[upstream.id]["alert_level"] == "evacuate"
+
+
+def test_malformed_mqtt_message_is_dropped_and_the_subscriber_keeps_going(harness, upstream):
+    uplink = MqttUplink(harness.backend.ingest, host="broker.invalid")
+    before = harness.nodes()
+
+    uplink.on_message(None, None, mqtt_message(b"\x00\x01 not a message"))
+
+    assert harness.nodes() == before
+    good = harness.message("alert", upstream.id, alert_level="watch")
+    uplink.on_message(None, None, mqtt_message(json.dumps(good).encode()))
+    assert harness.nodes()[upstream.id]["alert_level"] == "watch"
