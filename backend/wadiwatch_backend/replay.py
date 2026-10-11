@@ -1,5 +1,12 @@
 """Replay a recorded scenario into a running backend, for demonstration.
 
+The backend must have been started for it, on the local machine, with its HTTP
+ingest endpoint switched on (it is off otherwise, because it is not authenticated):
+
+    WADIWATCH_HTTP_INGEST=1 python -m wadiwatch_backend
+
+Then:
+
     python -m wadiwatch_backend.replay                  one scenario minute per second
     python -m wadiwatch_backend.replay --speed 120      twice as fast
     python -m wadiwatch_backend.replay --instant        everything at once, as an event that just ended
@@ -27,6 +34,10 @@ DEFAULT_SCENARIO = BACKEND_DIR / "scenarios" / "flood_demo.jsonl"
 DEFAULT_URL = "http://127.0.0.1:8000"
 # Scenario seconds per real second.
 DEFAULT_SPEED = 60.0
+
+
+class IngestSwitchedOff(Exception):
+    """The backend does not serve its HTTP ingest endpoint."""
 
 
 @dataclass
@@ -100,6 +111,9 @@ def http_sender(base_url):
         except urllib.error.HTTPError as error:
             if error.code == 400:
                 return REJECTED
+            if error.code in (404, 405):
+                # No such route: the backend was started without the endpoint.
+                raise IngestSwitchedOff(url) from None
             raise
 
     return send
@@ -158,6 +172,14 @@ def main(argv=None):
             instant=arguments.instant,
             report=_print_progress,
         )
+    except IngestSwitchedOff:
+        print(
+            f"The backend at {arguments.url} does not take messages over HTTP. Its HTTP ingest "
+            "endpoint is off unless the backend is started for a local replay:\n"
+            "    WADIWATCH_HTTP_INGEST=1 python -m wadiwatch_backend",
+            file=sys.stderr,
+        )
+        return 1
     except urllib.error.URLError as error:
         print(f"Could not reach the backend at {arguments.url}: {error.reason}", file=sys.stderr)
         return 1

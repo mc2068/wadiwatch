@@ -268,10 +268,10 @@ def test_the_alert_log_survives_a_restart(harness, visitor, site, upstream, sire
 
 
 def test_the_flood_scenario_leaves_a_reviewable_alert_log(
-    harness, visitor, site, clock, upstream, downstream, siren
+    harness, ingest_over_http, visitor, site, clock, upstream, downstream, siren
 ):
     def send(payload):
-        return harness.client.post("/api/ingest", content=payload).json()["status"]
+        return ingest_over_http(payload).json()["status"]
 
     replay(load_scenario(DEFAULT_SCENARIO), send, instant=True, clock=clock)
 

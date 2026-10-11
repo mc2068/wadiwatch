@@ -3,43 +3,74 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
+from wadiwatch_backend.app import HttpIngestRefused, http_ingest_setting
 from wadiwatch_backend.downlink import TEST_COMMAND_KEY, all_clear_command, command_auth_code
 from wadiwatch_backend.mqtt import MqttUplink
 
 
-def post(harness, payload):
-    return harness.client.post("/api/ingest", content=payload)
-
-
-def test_http_ingest_stores_a_message(harness, upstream):
+def test_http_ingest_stores_a_message(harness, ingest_over_http, upstream):
     message = harness.message("reading", upstream.id, level_cm=73.5, rise_cm_min=2.5)
 
-    response = post(harness, json.dumps(message))
+    response = ingest_over_http(json.dumps(message))
 
     assert response.status_code == 200
     assert response.json() == {"status": "stored"}
     assert harness.nodes()[upstream.id]["level_cm"] == 73.5
 
 
-def test_http_ingest_reports_a_duplicate_without_error(harness, upstream):
+def test_http_ingest_reports_a_duplicate_without_error(harness, ingest_over_http, upstream):
     payload = json.dumps(harness.message("alert", upstream.id, alert_level="watch"))
-    post(harness, payload)
+    ingest_over_http(payload)
 
-    response = post(harness, payload)
+    response = ingest_over_http(payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "duplicate"}
 
 
-def test_http_ingest_refuses_a_malformed_message(harness, upstream):
+def test_http_ingest_refuses_a_malformed_message(harness, ingest_over_http, upstream):
     before = harness.nodes()
 
-    response = post(harness, '{"kind": "reading"')
+    response = ingest_over_http('{"kind": "reading"')
 
     assert response.status_code == 400
     assert response.json()["status"] == "rejected"
     assert response.json()["error"]
     assert harness.nodes() == before
+
+
+# The HTTP endpoint is not authenticated: it is served only when asked for
+
+
+def test_the_http_ingest_endpoint_is_not_served_unless_it_is_switched_on(harness, upstream):
+    message = harness.message("alert", upstream.id, alert_level="evacuate", level_cm=180.0)
+
+    response = harness.client.post("/api/ingest", content=json.dumps(message))
+
+    # Nobody who can reach the dashboard can feed the backend a level or an alert.
+    assert response.status_code in (404, 405)
+    assert harness.nodes()[upstream.id]["alert_level"] == "none"
+    assert harness.nodes()[upstream.id]["last_message_ts"] is None
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "yes", "true"])
+def test_http_ingest_stays_off_unless_the_setting_is_exactly_1(value):
+    assert http_ingest_setting(value, "127.0.0.1") is False
+    # Off, it does not matter where the backend listens.
+    assert http_ingest_setting(value, "0.0.0.0") is False
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "127.0.0.2"])
+def test_http_ingest_can_be_switched_on_for_a_backend_that_listens_on_the_local_machine(host):
+    assert http_ingest_setting("1", host) is True
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.20", "backend.example.org"])
+def test_http_ingest_is_refused_for_a_backend_that_listens_on_a_network(host):
+    with pytest.raises(HttpIngestRefused, match="WADIWATCH_HTTP_INGEST"):
+        http_ingest_setting("1", host)
 
 
 def mqtt_message(payload):

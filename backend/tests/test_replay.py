@@ -1,15 +1,31 @@
-"""The replay tool feeds the recorded flood scenario through the HTTP ingest endpoint."""
+"""The replay tool feeds the recorded flood scenario through the HTTP ingest endpoint,
+which the backend serves only when it is started for a local replay."""
 
+import io
 import json
+import urllib.error
 
 import pytest
 
-from wadiwatch_backend.replay import DEFAULT_SCENARIO, left_open, load_scenario, replay
+from wadiwatch_backend import replay as replay_tool
+from wadiwatch_backend.replay import (
+    DEFAULT_SCENARIO,
+    IngestSwitchedOff,
+    http_sender,
+    left_open,
+    load_scenario,
+    replay,
+)
 
 
 @pytest.fixture
 def scenario():
     return load_scenario(DEFAULT_SCENARIO)
+
+
+@pytest.fixture(autouse=True)
+def backend_started_for_a_replay(ingest_over_http):
+    """Every scenario here replays into a backend whose HTTP ingest is switched on."""
 
 
 class Recorder:
@@ -115,3 +131,35 @@ def test_replaying_twice_adds_a_second_event_instead_of_duplicates(harness, scen
 
     assert summary.stored == len(scenario)
     assert summary.duplicate == 0
+
+
+# A backend that was not started for a replay
+
+
+def refusing(status):
+    """A stand-in for urllib's urlopen: the backend answers every request with `status`."""
+
+    def urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, status, "refused", {}, io.BytesIO(b"{}"))
+
+    return urlopen
+
+
+@pytest.mark.parametrize("status", [404, 405])
+def test_the_replay_tool_says_when_the_backend_does_not_serve_http_ingest(
+    monkeypatch, capsys, status
+):
+    monkeypatch.setattr(replay_tool.urllib.request, "urlopen", refusing(status))
+
+    with pytest.raises(IngestSwitchedOff):
+        http_sender("http://127.0.0.1:8000")("{}")
+    exit_code = replay_tool.main(["--instant"])
+
+    assert exit_code == 1
+    assert "WADIWATCH_HTTP_INGEST=1" in capsys.readouterr().err
+
+
+def test_the_replay_tool_still_counts_a_message_the_backend_rejects(monkeypatch):
+    monkeypatch.setattr(replay_tool.urllib.request, "urlopen", refusing(400))
+
+    assert http_sender("http://127.0.0.1:8000")("{}") == "rejected"

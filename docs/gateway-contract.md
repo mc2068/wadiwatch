@@ -39,7 +39,7 @@ Then run the backend tests.
 
 One topic carries every message kind, so the broker keeps them in order.
 
-The backend also accepts the same payload over HTTP, `POST /api/ingest`, with one message as the body. The replay tool and manual checks use it. Both transports call the same ingest function, so they behave identically.
+The backend can also take the same payload over HTTP, `POST /api/ingest`, with one message as the body, for the replay tool and manual checks. That endpoint is not authenticated, so the backend serves it only when it is started with `WADIWATCH_HTTP_INGEST=1`, and only while it listens on the local machine. Both transports call the same ingest function, so they behave identically.
 
 ## Rules
 
@@ -257,7 +257,7 @@ The arriving packet takes part: if it is less important than everything stored, 
 | `duplicate` | 200 `{"status":"duplicate"}` | Same `node`, `counter` and `ts` as a stored message. Nothing changes. |
 | `rejected` | 400 `{"status":"rejected","error":"..."}` | Anything else. Nothing is stored. |
 
-Over MQTT a rejected message is logged and dropped.
+Over MQTT a rejected message is logged and dropped. The HTTP answers are those of a backend that serves the endpoint (see "Transport"); one that does not answers 404.
 
 How stored messages become the alert level shown on the dashboard:
 

@@ -103,7 +103,7 @@ With a local key file in place the PC tests still pass: the shared contract exam
 
 ## Backend and dashboard
 
-The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level, the water level and rate-of-rise curves of each wadi node, node health, the age of the gateway's latest data, and the alert log, where officers acknowledge alerts and issue the all clear. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests and the replay tool feed messages in.
+The backend (Python, FastAPI, SQLite) takes the messages the gateway sends, stores them, and serves an API and the dashboard: a map of the nodes coloured by alert level, the water level and rate-of-rise curves of each wadi node, node health, the age of the gateway's latest data, and the alert log, where officers acknowledge alerts and issue the all clear. The message format is in `docs/gateway-contract.md`. It needs no hardware: tests feed messages in, and so does the replay tool, into a backend started for it.
 
 Setup, once (Python 3.10 or later):
 
@@ -132,7 +132,14 @@ cd backend
 python -m pytest
 ```
 
-Replay the flood scenario into the running backend, from a second terminal, and watch the map change:
+Replay the flood scenario into the backend and watch the map change. The replay tool sends over HTTP to `POST /api/ingest`, an endpoint that is not authenticated and that the backend does not serve unless it is started for a replay, on the local machine:
+
+```bash
+cd backend
+WADIWATCH_HTTP_INGEST=1 python -m wadiwatch_backend
+```
+
+Then, from a second terminal:
 
 ```bash
 cd backend
@@ -188,7 +195,7 @@ The command needs a way to the gateway. With `WADIWATCH_MQTT_HOST` set it goes t
 
 ```bash
 cd backend
-WADIWATCH_GATEWAY=simulated python -m wadiwatch_backend
+WADIWATCH_GATEWAY=simulated WADIWATCH_HTTP_INGEST=1 python -m wadiwatch_backend
 python -m wadiwatch_backend.replay --instant --leave-open    # second terminal
 ```
 
@@ -196,7 +203,7 @@ The simulated gateway is a stand-in for trying the dashboard without hardware: i
 
 Settings are environment variables, listed in `backend/wadiwatch_backend/__main__.py`. Three matter most:
 
-- `WADIWATCH_MQTT_HOST`: the MQTT broker to read gateway messages from (topic `wadiwatch/up`) and to send the gateway its commands through (topic `wadiwatch/down`). Without it the backend is fed only through `POST /api/ingest`, which is what the replay tool uses.
+- `WADIWATCH_MQTT_HOST`: the MQTT broker to read gateway messages from (topic `wadiwatch/up`) and to send the gateway its commands through (topic `wadiwatch/down`). Without it the backend hears no gateway.
 - `WADIWATCH_COMMAND_KEY`: the command key the gateway holds, as 64 hexadecimal digits (see "The command key" above). Without it the backend signs its all clear commands with the published test key, which a gateway with a real key ignores.
 - `WADIWATCH_SITE`: the site file with the nodes' identifiers, names and map positions, the wadis, and the settings below. The default, `backend/site/prototype.json`, uses placeholder positions in the Nabeul area, not surveyed locations.
 
@@ -214,4 +221,4 @@ What the dashboard says about health, staleness and the all clear follows from t
 
 Low-battery and tamper flags come straight from each node's latest heartbeat. The API behind these panels is `GET /api/health` and `GET /api/nodes/<id>/readings?from=<unix seconds>&to=<unix seconds>` (the last day if no period is given).
 
-The ingest endpoint is not authenticated. The backend listens on the local machine only unless `WADIWATCH_HOST` says otherwise; do not expose it to a network as it is.
+`POST /api/ingest` takes gateway messages from anyone who can reach it, and the all clear is judged on gateway messages. So the backend serves it only when `WADIWATCH_HTTP_INGEST=1` is set, which is meant for replaying a scenario on the local machine, and refuses to start with that setting when `WADIWATCH_HOST` is anything but the local machine. A backend started without it answers 404 there, and the replay tool says how to start it. The backend listens on the local machine only unless `WADIWATCH_HOST` says otherwise. The MQTT topics are as open as the broker makes them: give the broker accounts and access rules before the backend is exposed to a network (the gateway's commands are authenticated, its messages are not).

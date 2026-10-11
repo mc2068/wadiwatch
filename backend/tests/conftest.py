@@ -72,6 +72,9 @@ class Harness:
         self.db_path = db_path
         self.site = site
         self.clock = clock
+        # Whether the backend serves its HTTP ingest endpoint: off, as it starts
+        # unless asked. The `ingest_over_http` fixture switches it on.
+        self.http_ingest = False
         # The key the backend signs its commands with, and its gateway checks them against.
         self.command_key = command_key
         self._counters = {}
@@ -90,7 +93,7 @@ class Harness:
             downlink=self.gateway,
             command_key=self.command_key,
         )
-        self.client = TestClient(create_app(self.backend))
+        self.client = TestClient(create_app(self.backend, http_ingest=self.http_ingest))
 
     def stop(self):
         if self.backend is not None:
@@ -155,6 +158,15 @@ def harness(tmp_path, site, clock):
     harness = Harness(tmp_path / "wadiwatch.db", site, clock)
     yield harness
     harness.stop()
+
+
+@pytest.fixture
+def ingest_over_http(harness):
+    """The backend started with its HTTP ingest endpoint switched on, as for a local
+    replay. Posts one payload to it and returns the response."""
+    harness.http_ingest = True
+    harness.restart()
+    return lambda payload: harness.client.post("/api/ingest", content=payload)
 
 
 @pytest.fixture
