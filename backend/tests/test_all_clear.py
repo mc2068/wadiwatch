@@ -7,14 +7,25 @@ records the commands the backend hands over, and a test says what the gateway
 does with one (`harness.gateway_relays`).
 """
 
+import hashlib
+import hmac
 import json
+import struct
 
 import pytest
 
 from conftest import Harness
 from officer_support import CSRF_HEADER, Browser
 from wadiwatch_backend.backend import GatewayUnreachable
-from wadiwatch_backend.downlink import all_clear_command
+from wadiwatch_backend.contract import ContractError
+from wadiwatch_backend.downlink import (
+    TEST_COMMAND_KEY,
+    CommandKeyError,
+    all_clear_command,
+    command_auth_code,
+    command_key_from,
+    parse_command,
+)
 from wadiwatch_backend.simulated_gateway import SimulatedGateway
 from wadiwatch_backend.site import DEFAULT_SITE_FILE, load_site
 
@@ -144,7 +155,9 @@ def test_an_all_clear_is_accepted_once_the_level_has_been_below_the_threshold_fo
         "ts": int(clock()),
     }
     # The gateway is sent exactly the command the contract defines, naming the wadi.
-    assert harness.gateway.raw == [all_clear_command(command["command"], int(clock()), wadi.id)]
+    assert harness.gateway.raw == [
+        all_clear_command(command["command"], int(clock()), wadi.id, TEST_COMMAND_KEY)
+    ]
 
 
 def test_the_quiet_period_is_the_one_in_the_site_file(tmp_path, clock, upstream, downstream):
@@ -699,6 +712,7 @@ def test_the_command_carries_the_time_it_was_issued_and_a_number_of_its_own(
         "command": first["command"],
         "ts": first["ts"],
         "wadi": wadi.id,
+        "auth": command_auth_code(TEST_COMMAND_KEY, first["command"], first["ts"], wadi.id),
     }
     assert sent_second["ts"] == int(clock())
     assert sent_second["command"] > sent_first["command"] >= 1
@@ -910,13 +924,119 @@ def test_a_siren_node_acknowledgement_of_an_alert_after_the_all_clear_is_in_forc
     assert harness.nodes()[siren.id]["alert_level"] == "warning"
 
 
+# Only the backend's commands: the authentication code
+
+ANOTHER_KEY = bytes(range(32))
+
+
+def test_the_command_carries_the_authentication_code_of_the_command_key(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    flood_that_has_passed(harness, clock, site, upstream, downstream)
+
+    issued = signed_in.issue_all_clear(wadi.id).json()
+
+    (raw,) = harness.gateway.raw
+    sent = json.loads(raw)
+    # HMAC-SHA-256 under the key the backend shares with the gateway, over the
+    # command's fields as the contract lays them out: version, kind, number, time, wadi.
+    fields = struct.pack(">BBIIB", 1, 1, issued["command"], issued["ts"], wadi.id)
+    assert sent["auth"] == hmac.new(TEST_COMMAND_KEY, fields, hashlib.sha256).hexdigest()
+    assert list(sent) == ["v", "kind", "command", "ts", "wadi", "auth"]
+
+
+def test_the_authentication_code_is_the_one_the_gateway_works_out():
+    # The same vector as firmware/test/test_all_clear: one command, the published test key.
+    assert (
+        command_auth_code(TEST_COMMAND_KEY, command=41, ts=1791593990, wadi=1)
+        == "798ce3d2ad55640ccdeba5e6dead5ae444082d2e1eb6abb258767837b9782f9a"
+    )
+
+
+def test_a_backend_given_its_own_command_key_signs_with_it(
+    tmp_path, site, clock, wadi, upstream, downstream
+):
+    harness = Harness(tmp_path / "wadiwatch.db", site, clock, command_key=ANOTHER_KEY)
+    try:
+        flood_that_has_passed(harness, clock, site, upstream, downstream)
+
+        harness.backend.issue_all_clear(wadi.id, "officer1")
+
+        (raw,) = harness.gateway.raw
+        assert parse_command(raw, ANOTHER_KEY)["wadi"] == wadi.id
+        # A gateway that holds the published test key does not act on it.
+        with pytest.raises(ContractError, match="authentication code"):
+            parse_command(raw, TEST_COMMAND_KEY)
+    finally:
+        harness.stop()
+
+
+@pytest.mark.parametrize("field", ["command", "ts", "wadi"])
+def test_a_command_changed_after_it_was_signed_is_refused(field):
+    genuine = json.loads(all_clear_command(41, 1791593990, 1, TEST_COMMAND_KEY))
+    assert parse_command(json.dumps(genuine), TEST_COMMAND_KEY) == genuine
+
+    changed = dict(genuine, **{field: genuine[field] + 1})
+
+    with pytest.raises(ContractError, match="authentication code"):
+        parse_command(json.dumps(changed), TEST_COMMAND_KEY)
+
+
+@pytest.mark.parametrize(
+    "why, auth",
+    [
+        ("no code", None),
+        ("a code that is too short", "ab" * 31),
+        ("a code in capitals", "AB" * 32),
+        ("a code that is not hexadecimal", "zz" * 32),
+        ("a code that is a number", 12),
+        ("a code of the right shape that no key gave", "00" * 32),
+    ],
+)
+def test_a_command_without_a_valid_authentication_code_is_refused(why, auth):
+    command = json.loads(all_clear_command(41, 1791593990, 1, TEST_COMMAND_KEY))
+    if auth is None:
+        del command["auth"]
+    else:
+        command["auth"] = auth
+
+    with pytest.raises(ContractError):
+        parse_command(json.dumps(command), TEST_COMMAND_KEY)
+
+
+def test_the_command_key_comes_from_a_setting_and_is_the_test_key_without_one():
+    assert command_key_from(None) == TEST_COMMAND_KEY
+    assert command_key_from("") == TEST_COMMAND_KEY
+    assert command_key_from(ANOTHER_KEY.hex()) == ANOTHER_KEY
+    assert command_key_from(ANOTHER_KEY.hex().upper()) == ANOTHER_KEY
+
+
+@pytest.mark.parametrize("setting", ["not hexadecimal", "abcd", "00" * 31, "00" * 33])
+def test_a_command_key_that_is_not_32_bytes_in_hexadecimal_is_refused(setting):
+    with pytest.raises(CommandKeyError):
+        command_key_from(setting)
+
+
 # The stand-in gateway for trying the dashboard without hardware
+
+
+def test_the_simulated_gateway_acts_only_on_a_command_signed_with_its_command_key(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    harness.backend.downlink = SimulatedGateway(harness.backend, clock, ANOTHER_KEY)
+    flood_that_has_passed(harness, clock, site, upstream, downstream)
+
+    response = signed_in.issue_all_clear(wadi.id)
+
+    assert response.status_code == 503
+    assert signed_in.all_clears() == []
+    assert signed_in.alerts()[0]["in_force"] is True
 
 
 def test_with_the_simulated_gateway_an_all_clear_comes_back_as_the_gateway_would_report_it(
     harness, signed_in, officer, clock, site, wadi, upstream, downstream
 ):
-    harness.backend.downlink = SimulatedGateway(harness.backend, clock)
+    harness.backend.downlink = SimulatedGateway(harness.backend, clock, TEST_COMMAND_KEY)
     # The stand-in carries on from the gateway's own counter, as a replayed scenario leaves it.
     harness.ingest("all_clear", site.gateway.id, wadi_node=upstream.id)
     flood_that_has_passed(harness, clock, site, upstream, downstream)

@@ -3,7 +3,7 @@
 Version 1. Two directions over one connection:
 
 - **Up**: what the gateway sends the backend for every radio packet it accepts or transmits. The gateway firmware produces it; the backend ingest validates it. Most of this document.
-- **Down**: the one command the backend sends the gateway, the all clear for a wadi. See "Commands" below.
+- **Down**: the one command the backend sends the gateway, the all clear for a wadi, with an authentication code that only the backend can make. See "Commands" below.
 
 Where each side is written down:
 
@@ -14,7 +14,7 @@ Where each side is written down:
 - Down, what the backend produces: `backend/wadiwatch_backend/downlink.py` and `docs/gateway-contract/backend-commands.jsonl`.
 - Down, what the gateway reads: `firmware/lib/wadiwatch/src/wadiwatch/downlink_command.cpp`.
 
-`gateway-output.jsonl` and `backend-commands.jsonl` are the shared contract check. The first holds the messages the gateway core hands to its uplink for a fixed scenario covering every message kind and every node the gateway hears: one flood at both wadi nodes of the prototype site, with the refresh of an alert, the Evacuate the downstream wadi node raises on hearing the upstream one, and the all clear, which the gateway relays on the command of the second file. The firmware tests (`firmware/test/test_gateway_contract`) feed the gateway core that command, produce the messages again and fail if the first file differs by a byte or the core refuses a line of the second. The backend tests ingest the first file and fail if the backend refuses a line, and fail if the backend does not produce the lines of the second byte for byte. So the gateway and the backend cannot drift apart in either direction without a test failing on one side, although the two suites never run together.
+`gateway-output.jsonl` and `backend-commands.jsonl` are the shared contract check. The second is signed with the published test command key, so it also holds the two sides to the same test key and the same way of computing the authentication code. The first holds the messages the gateway core hands to its uplink for a fixed scenario covering every message kind and every node the gateway hears: one flood at both wadi nodes of the prototype site, with the refresh of an alert, the Evacuate the downstream wadi node raises on hearing the upstream one, and the all clear, which the gateway relays on the command of the second file. The firmware tests (`firmware/test/test_gateway_contract`) feed the gateway core that command, produce the messages again and fail if the first file differs by a byte or the core refuses a line of the second. The backend tests ingest the first file and fail if the backend refuses a line, and fail if the backend does not produce the lines of the second byte for byte. So the gateway and the backend cannot drift apart in either direction without a test failing on one side, although the two suites never run together.
 
 Change this document, `contract.py`, `downlink.py`, the gateway's translation and reader, and the example files together. To rewrite `gateway-output.jsonl` after an intended change, run from `firmware/`:
 
@@ -193,14 +193,34 @@ What the backend sends down to the gateway, on `wadiwatch/down`. There is one co
 | `command` | integer, 1 to 4294967295 | The backend's number for this command. It comes back in every `all_clear` message the gateway sends for it. |
 | `ts` | integer, 1 to 4294967295 | Unix time in whole seconds, UTC, at which the backend issued the command. |
 | `wadi` | integer, 1 to 255 | The wadi, by its identifier in the firmware site configuration (`WadiConfig::id`) and the backend site file (`wadis[].id`). The all clear covers every wadi node on it. |
+| `auth` | string, 64 hexadecimal digits in lower case | The authentication code of the command under the command key. See "Authentication code" below. |
 
 ```json
-{"v":1,"kind":"all_clear","command":41,"ts":1791593990,"wadi":1}
+{"v":1,"kind":"all_clear","command":41,"ts":1791593990,"wadi":1,"auth":"798ce3d2ad55640ccdeba5e6dead5ae444082d2e1eb6abb258767837b9782f9a"}
 ```
 
 The backend writes the fields in this order with no white space. The gateway reads them in any order and is as strict as the backend is with messages: a command with a missing field, a field given twice, a field this table does not list, a value out of range or of the wrong type, another version or another kind is dropped whole.
 
-What the gateway does with a command:
+### Authentication code
+
+The MQTT broker is not trusted to decide who may silence a siren: whoever can publish to `wadiwatch/down` can put a well-formed command there. So the backend and the gateway share a secret, the **command key** (32 bytes), and every command carries the code that key gives it. The gateway works the code out again from the fields it read and drops the command unless the two are equal.
+
+- The code is HMAC-SHA-256 under the command key, the whole digest, written as 64 hexadecimal digits in lower case.
+- It is computed over these 11 bytes, not over the JSON text, so field order and white space do not matter:
+
+| Bytes | Content |
+|---|---|
+| 0 | `v`, the contract version |
+| 1 | the kind of command: `1` for `all_clear` |
+| 2 to 5 | `command`, big-endian |
+| 6 to 9 | `ts`, big-endian |
+| 10 | `wadi` |
+
+- The command key is not the site key that signs radio packets. Every wadi node and siren node holds the site key, and a node taken from its mast must not give anyone the means to command the gateway. The command key is on the gateway and the backend only.
+- The key in the repository is a published test key (the ASCII text `WADIWATCH-TEST-COMMAND-KEY-ONLY!`), the same in `firmware/lib/wadiwatch/src/wadiwatch/command_key.cpp` and `backend/wadiwatch_backend/downlink.py`, for tests and the bench. The example above and `backend-commands.jsonl` are signed with it. A real key is never committed: the README says where each side takes it from.
+- The code covers `ts`, and the gateway acts only on a fresh command (below), so a command read off the broker cannot be kept and given a later date. Sent again unchanged within those two minutes it is the officer's own decision arriving twice.
+
+What the gateway does with a command that carries the right code:
 
 1. **Only a fresh one.** A command can wait at the broker while the gateway is offline and arrive when the wadi is in flood again. The gateway acts on a command only if `ts` is no more than `GatewayConfig::commandMaxAgeS` (120 s on the prototype site) before its own clock, and not that much after it. It does not act on any command while it does not know the time. The backend does its part: it never retains a command, and does not hand one to an MQTT client that has no connection.
 2. **Once.** The same `command` and `ts` delivered twice (QoS 1) is acted on once. A command for a wadi the gateway does not know is dropped.
@@ -247,6 +267,7 @@ How stored messages become the alert level shown on the dashboard:
 
 - The radio packet layouts are owned by the firmware. If an acknowledgement packet cannot supply `alert_level`, or a heartbeat packet cannot supply a field required here, change this contract rather than inventing values in the gateway.
 - The gateway does not send a heartbeat of its own. If the dashboard needs to tell a silent gateway from a quiet wadi more quickly than the nodes' own traffic allows, add a gateway message kind.
-- The gateway does not tell the backend that it refused or ignored a command. If the officer should see why an all clear did not happen (a stale command, a gateway without the time of day), add a gateway message kind for it.
+- The gateway does not tell the backend that it refused or ignored a command. If the officer should see why an all clear did not happen (a stale command, a gateway without the time of day, a command key that is not the backend's), add a gateway message kind for it.
+- Messages going up are not authenticated between the gateway and the backend: whoever can publish to `wadiwatch/up` can feed the backend false levels, on which an all clear could then be accepted. That needs the broker to restrict who may publish (accounts and access rules), or an authentication code on messages as on commands.
 - An officer cannot issue an all clear for a wadi while one of its wadi nodes is silent or has never reported a level, so a wadi node destroyed by the flood blocks the all clear for its wadi until it is replaced. Whether an officer may override that, and how, is not decided.
 - The gateway does not tell the backend when it has given up messages from a full store. A gateway message kind could carry that count.

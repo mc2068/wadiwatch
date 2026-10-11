@@ -166,10 +166,11 @@ static void test_radio_drops_the_requested_number_of_frames_of_one_sender_only()
   TEST_ASSERT_EQUAL_UINT(4, air.transmitted().size());
 }
 
-static std::string receiveCommand(FakeUplink& uplink) {
-  char buffer[128];
-  const size_t length = uplink.receive(buffer, sizeof(buffer));
-  return std::string(buffer, length);
+// The next command the uplink hands over to a device whose buffer holds `capacity` bytes.
+static std::string receiveCommand(FakeUplink& uplink, size_t capacity = 128) {
+  std::vector<char> buffer(capacity);
+  const size_t length = uplink.receive(buffer.data(), buffer.size());
+  return std::string(buffer.data(), length);
 }
 
 static void test_the_uplink_hands_over_the_commands_delivered_to_it_in_order() {
@@ -204,25 +205,30 @@ static void test_a_command_too_long_for_the_buffer_is_dropped() {
   TEST_ASSERT_EQUAL_STRING("next", receiveCommand(uplink).c_str());
 }
 
-// The command a scenario has the backend send is worded as the contract words it
-// and numbered like the backend's: one after the other, from one.
+// The command a scenario has the backend send is worded as the contract words it,
+// numbered like the backend's (one after the other, from one) and signed with the
+// command key the site's gateway holds.
 static void test_the_site_issues_all_clear_commands_as_the_backend_does() {
   TestSite site;
   const wadiwatch::WadiId wadi = site.config.gateway.wadis[0].id;
   site.unplugGateway();
   site.runMinutes(1);
-  const std::string issuedAt = std::to_string(site.wallClock.unixSeconds());
+  const uint32_t issuedAt = site.wallClock.unixSeconds();
 
   TEST_ASSERT_EQUAL_UINT32(1, site.issueAllClear());
   TEST_ASSERT_EQUAL_UINT32(2, site.issueAllClear(wadi));
 
+  wadiwatch::CommandAuthCode code;
+  wadiwatch::writeCommandAuthCode(site.commandAuth,
+                                  wadiwatch::AllClearCommand{1, issuedAt, wadi}, code);
   TEST_ASSERT_EQUAL_STRING(
-      ("{\"v\":1,\"kind\":\"all_clear\",\"command\":1,\"ts\":" + issuedAt + ",\"wadi\":" +
-       std::to_string(wadi) + "}")
+      ("{\"v\":1,\"kind\":\"all_clear\",\"command\":1,\"ts\":" + std::to_string(issuedAt) +
+       ",\"wadi\":" + std::to_string(wadi) + ",\"auth\":\"" + code.text + "\"}")
           .c_str(),
-      receiveCommand(site.uplink).c_str());
-  TEST_ASSERT_EQUAL_STRING(TestSite::allClearCommand(2, site.wallClock.unixSeconds(), wadi).c_str(),
-                           receiveCommand(site.uplink).c_str());
+      receiveCommand(site.uplink, wadiwatch::kMaxDownlinkCommandLength + 1).c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      site.allClearCommand(2, issuedAt, wadi).c_str(),
+      receiveCommand(site.uplink, wadiwatch::kMaxDownlinkCommandLength + 1).c_str());
 }
 
 int main(int, char**) {

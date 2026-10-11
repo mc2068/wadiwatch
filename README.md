@@ -88,7 +88,18 @@ A wadi node sleeps with its receiver off. While it holds an alert level it keeps
 
 A wadi node that holds no alert level of its own can sleep through the all clear and still remember the Warning it heard from its upstream node. That memory lapses by itself: what was heard from upstream is in force only while the upstream node's alert refresh keeps arriving, and is dropped once none has been heard for `upstream.alertRefreshTimeoutMs` (5 minutes, five alert refresh intervals). A node at Warning listens without a break, so a genuine confirmation is never more than one alert refresh away.
 
-What the gateway does not act on: a command that is malformed, names a wadi it does not know, is older than `commandMaxAgeS` (2 minutes) by its own clock, or arrives while it does not know the time. A command can wait at the MQTT broker through an uplink outage, and must not end a later flood. With GSM down the all clear still goes out on the radio and the closing SMS follow when the network returns; with the uplink down after the command arrived, the all clear goes out and is reported when the uplink returns. Every one of these values is in the site configuration (`GatewayConfig`, `WadiNodeConfig`), and the scenarios are in `firmware/test/test_all_clear`.
+What the gateway does not act on: a command that does not carry the authentication code of its command key (see "The command key" below), is malformed, names a wadi it does not know, is older than `commandMaxAgeS` (2 minutes) by its own clock, or arrives while it does not know the time. A command can wait at the MQTT broker through an uplink outage, and must not end a later flood. With GSM down the all clear still goes out on the radio and the closing SMS follow when the network returns; with the uplink down after the command arrived, the all clear goes out and is reported when the uplink returns. Every one of these values is in the site configuration (`GatewayConfig`, `WadiNodeConfig`), and the scenarios are in `firmware/test/test_all_clear`.
+
+### The command key
+
+Anyone who can publish to the MQTT broker can put an all clear command on the gateway's topic. The gateway therefore acts only on a command that carries an authentication code made with the command key, a 32-byte secret shared by the backend and the gateway and by nobody else (the contract document says how the code is computed). It is a different key from the site key: the site key is in every wadi node and siren node, the command key only in the gateway firmware.
+
+It follows the rules of the site key. The key in the repository is a published test key, for tests and the bench only; the backend logs a warning while it signs with it. A real command key never goes into the repository:
+
+- gateway: add `#define WADIWATCH_COMMAND_KEY { 0x.., ... }` (32 bytes) to `firmware/lib/wadiwatch/src/wadiwatch/site_key_local.h`, the same git-ignored file that holds the real site key, as described at the top of `command_key.cpp`;
+- backend: set `WADIWATCH_COMMAND_KEY` to the same 32 bytes as 64 hexadecimal digits, in the environment of the machine that runs it. Never put it in a file that is committed, an issue or a message.
+
+With a local key file in place the PC tests still pass: the shared contract examples are checked against the published test key, and every other scenario signs with whatever key the gateway under test holds.
 
 ## Backend and dashboard
 
@@ -183,9 +194,10 @@ python -m wadiwatch_backend.replay --instant --leave-open    # second terminal
 
 The simulated gateway is a stand-in for trying the dashboard without hardware: it answers the command with the `all_clear` messages a gateway would report, and nothing else happens (no radio, no siren, no SMS). After an instant replay the nodes of the scenario stop reporting, so the data turns stale two minutes later and the all clear is refused from then on, as it should be.
 
-Settings are environment variables, listed in `backend/wadiwatch_backend/__main__.py`. Two matter most:
+Settings are environment variables, listed in `backend/wadiwatch_backend/__main__.py`. Three matter most:
 
 - `WADIWATCH_MQTT_HOST`: the MQTT broker to read gateway messages from (topic `wadiwatch/up`) and to send the gateway its commands through (topic `wadiwatch/down`). Without it the backend is fed only through `POST /api/ingest`, which is what the replay tool uses.
+- `WADIWATCH_COMMAND_KEY`: the command key the gateway holds, as 64 hexadecimal digits (see "The command key" above). Without it the backend signs its all clear commands with the published test key, which a gateway with a real key ignores.
 - `WADIWATCH_SITE`: the site file with the nodes' identifiers, names and map positions, the wadis, and the settings below. The default, `backend/site/prototype.json`, uses placeholder positions in the Nabeul area, not surveyed locations.
 
 The site file names the wadis (`wadis`: an identifier and a name each) and gives every wadi node the wadi it is mounted over (`wadi`) and its Watch threshold in centimetres above the bed (`watch_level_cm`). The wadi identifiers and the thresholds must agree with the firmware site configuration: on the prototype site, one wadi with both wadi nodes, and 60 cm (30 % of a bank-full depth of 200 cm). A site file without them is refused when the backend starts. Nothing stored changes shape: an existing database file keeps working.

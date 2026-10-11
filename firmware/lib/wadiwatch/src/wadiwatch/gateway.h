@@ -13,7 +13,9 @@
 // do not wait for the uplink, nor the uplink for the SMS.
 //
 // The all clear comes down the same uplink as a command of the backend, for one
-// wadi. The gateway then ends the event at that wadi, queues the closing SMS for
+// wadi. The gateway acts only on a command that carries the authentication code of
+// the command key it shares with the backend: whoever else can publish to the broker
+// cannot silence a siren. It then ends the event at that wadi, queues the closing SMS for
 // everyone who received an alert for it, and transmits a signed all clear packet
 // naming each wadi node of the wadi, which is also forwarded to the backend like
 // any packet it hears. How a wadi node that sleeps is made to hear it is described
@@ -37,6 +39,7 @@ class Gateway {
  public:
   Gateway(const GatewayConfig& config,
           const SiteAuth& auth,
+          const CommandAuth& commandAuth,
           const RecipientList& recipients,
           Clock& clock,
           Radio& radio,
@@ -133,6 +136,7 @@ class Gateway {
   void transmitOneAllClear(uint64_t nowMs);
 
   GatewayConfig config_;
+  CommandAuth commandAuth_;
   RecipientList recipients_;
   Clock& clock_;
   Radio& radio_;

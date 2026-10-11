@@ -32,6 +32,7 @@ const char* nameIn(const WadiConfig& wadi, Language language) {
 
 Gateway::Gateway(const GatewayConfig& config,
                  const SiteAuth& auth,
+                 const CommandAuth& commandAuth,
                  const RecipientList& recipients,
                  Clock& clock,
                  Radio& radio,
@@ -42,6 +43,7 @@ Gateway::Gateway(const GatewayConfig& config,
                  SlotStorage& messageStorage,
                  RandomSource& random)
     : config_(config),
+      commandAuth_(commandAuth),
       recipients_(recipients),
       clock_(clock),
       radio_(radio),
@@ -202,14 +204,18 @@ bool Gateway::findWadiNode(NodeId wadiNode, size_t& wadiIndex, size_t& nodeIndex
   return false;
 }
 
-// Takes in the commands the backend has sent down. One that is malformed is dropped
-// whole: the gateway never acts on part of a command.
+// Takes in the commands the backend has sent down. One that is malformed, or does
+// not carry the authentication code of the command key, is dropped whole: the
+// gateway never acts on part of a command, nor on a command from anyone but the
+// backend.
 void Gateway::handleCommands(uint64_t nowMs) {
   char text[kMaxDownlinkCommandLength + 1];
   size_t length;
   while ((length = uplink_.receive(text, sizeof(text))) > 0) {
     AllClearCommand command;
-    if (parseAllClearCommand(text, length, command)) handleAllClearCommand(command, nowMs);
+    if (readAllClearCommand(text, length, commandAuth_, command)) {
+      handleAllClearCommand(command, nowMs);
+    }
   }
 }
 

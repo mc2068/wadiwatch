@@ -7,6 +7,9 @@ stand-in takes the command and answers as the gateway would: one `all_clear`
 message for each wadi node of the wadi, through the same ingest as everything
 else.
 
+Like the gateway it acts only on a command that carries the authentication
+code of the command key it holds.
+
 It sounds no siren and sends no SMS, and nothing in it is the gateway's code.
 It is only switched on by WADIWATCH_GATEWAY=simulated (see __main__.py): never
 use it where a real gateway is listening.
@@ -22,15 +25,16 @@ log = logging.getLogger("wadiwatch.simulated_gateway")
 
 
 class SimulatedGateway:
-    def __init__(self, backend, clock):
+    def __init__(self, backend, clock, command_key):
         self._backend = backend
         self._clock = clock
+        self._command_key = command_key
         self._counter = None
 
     def __call__(self, payload):
         """Take one command, as the downlink of a Backend. Returns True if it was acted on."""
         try:
-            command = parse_command(payload)
+            command = parse_command(payload, self._command_key)
         except ContractError as error:
             log.warning("simulated gateway: command refused: %s", error)
             return False

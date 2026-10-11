@@ -87,6 +87,9 @@ struct TestSite {
   InMemoryRadio& gatewayRadio = air.join();
   // The recipient list entered on the gateway.
   RecipientList recipients;
+  // The command key the gateway shares with the backend. A scenario that changes it
+  // restarts the gateway to have it take effect.
+  CommandAuth commandAuth = prototypeCommandAuth();
   FakeGsmModem modem;
   // The gateway's way to the backend, the time of day it dates messages with,
   // and the storage its messages wait in.
@@ -136,11 +139,30 @@ struct TestSite {
   // The all clear for the site's first wadi: the one the prototype's wadi nodes are on.
   uint32_t issueAllClear() { return issueAllClear(config.gateway.wadis[0].id); }
 
-  // The backend's all clear command as it travels down the uplink.
-  static std::string allClearCommand(uint32_t command, uint32_t issuedAtUnixSeconds, WadiId wadi) {
-    return "{\"v\":1,\"kind\":\"all_clear\",\"command\":" + std::to_string(command) +
-           ",\"ts\":" + std::to_string(issuedAtUnixSeconds) + ",\"wadi\":" + std::to_string(wadi) +
-           "}";
+  // The backend's all clear command as it travels down the uplink, carrying the
+  // authentication code of the command key this site's gateway holds.
+  std::string allClearCommand(uint32_t command, uint32_t issuedAtUnixSeconds, WadiId wadi) const {
+    return allClearCommand(commandAuth, command, issuedAtUnixSeconds, wadi);
+  }
+
+  // The same from whoever holds `auth`: the backend, or someone signing with a key
+  // of their own.
+  static std::string allClearCommand(const CommandAuth& auth, uint32_t command,
+                                     uint32_t issuedAtUnixSeconds, WadiId wadi) {
+    CommandAuthCode code;
+    writeCommandAuthCode(auth, AllClearCommand{command, issuedAtUnixSeconds, wadi}, code);
+    return unsignedAllClearCommand(command, issuedAtUnixSeconds, wadi, code.text);
+  }
+
+  // The command with whatever stands in the place of its authentication code; with
+  // none at all, the command as anyone could write it who has read the contract.
+  static std::string unsignedAllClearCommand(uint32_t command, uint32_t issuedAtUnixSeconds,
+                                             WadiId wadi, const char* authCode = nullptr) {
+    std::string text = "{\"v\":1,\"kind\":\"all_clear\",\"command\":" + std::to_string(command) +
+                       ",\"ts\":" + std::to_string(issuedAtUnixSeconds) +
+                       ",\"wadi\":" + std::to_string(wadi);
+    if (authCode != nullptr) text += std::string(",\"auth\":\"") + authCode + "\"";
+    return text + "}";
   }
 
   // The longest it takes from the command until every all clear packet it calls for
@@ -310,7 +332,7 @@ struct TestSite {
   }
 
   std::unique_ptr<Gateway> makeGateway() {
-    return std::unique_ptr<Gateway>(new Gateway(config.gateway, config.auth, recipients, clock,
+    return std::unique_ptr<Gateway>(new Gateway(config.gateway, config.auth, commandAuth, recipients, clock,
                                                 gatewayRadio, modem, gatewayStorage, wallClock,
                                                 uplink, gatewayMessageStorage, gatewayRandom));
   }

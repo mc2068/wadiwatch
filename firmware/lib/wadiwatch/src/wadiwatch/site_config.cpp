@@ -7,7 +7,8 @@
 //
 //   #define WADIWATCH_SITE_KEY { 0x.., 0x.., ... }   // kSiteKeySize random bytes
 //
-// and flash every node of the site from the same checkout.
+// and flash every node of the site from the same checkout. The same file holds the
+// gateway's command key (command_key.cpp), which is a different key.
 #if defined(__has_include)
 #if __has_include("wadiwatch/site_key_local.h")
 #include "wadiwatch/site_key_local.h"

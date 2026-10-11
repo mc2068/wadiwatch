@@ -2,7 +2,9 @@
 
 #include <cstring>
 
+#include "wadiwatch/byte_order.h"
 #include "wadiwatch/gateway_contract.h"
+#include "wadiwatch/sha256.h"
 
 namespace wadiwatch {
 
@@ -13,6 +15,24 @@ constexpr uint32_t kMaxWadiId = 255;
 constexpr uint32_t kMaxUint32 = 0xFFFFFFFFu;
 // Longer than any field name or word of the contract.
 constexpr size_t kMaxWordLength = 16;
+
+// What the authentication code of a command is computed over, multi-byte fields
+// big-endian:
+//
+//   0      contract version
+//   1      kind of command: 1 is the all clear
+//   2-5    command number
+//   6-9    ts
+//   10     wadi
+constexpr uint8_t kAllClearKindCode = 1;
+constexpr size_t kSignedVersionOffset = 0;
+constexpr size_t kSignedKindOffset = 1;
+constexpr size_t kSignedCommandOffset = 2;
+constexpr size_t kSignedIssuedAtOffset = 6;
+constexpr size_t kSignedWadiOffset = 10;
+constexpr size_t kSignedSize = 11;
+static_assert(2 * kSha256DigestSize == kCommandAuthCodeLength,
+              "the authentication code is the whole digest in hexadecimal");
 
 // Walks over the text of one command. Every read fails for good once the text is
 // not what was asked for.
@@ -44,6 +64,19 @@ class Scanner {
       word[count++] = c;
     }
     word[count] = '\0';
+    return take('"');
+  }
+
+  // A string of exactly `length` hexadecimal digits, the letters in lower case.
+  bool hex(char* digits, size_t length) {
+    if (!take('"')) return false;
+    for (size_t i = 0; i < length; ++i) {
+      if (at_ >= length_) return false;
+      const char c = text_[at_++];
+      if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+      digits[i] = c;
+    }
+    digits[length] = '\0';
     return take('"');
   }
 
@@ -87,7 +120,48 @@ class Scanner {
 
 }  // namespace
 
-bool parseAllClearCommand(const char* text, size_t length, AllClearCommand& command) {
+void writeCommandAuthCode(const CommandAuth& auth,
+                          const AllClearCommand& command,
+                          CommandAuthCode& code) {
+  uint8_t fields[kSignedSize];
+  fields[kSignedVersionOffset] = static_cast<uint8_t>(kContractVersion);
+  fields[kSignedKindOffset] = kAllClearKindCode;
+  put32(fields + kSignedCommandOffset, command.command);
+  put32(fields + kSignedIssuedAtOffset, command.issuedAt);
+  fields[kSignedWadiOffset] = command.wadi;
+
+  uint8_t digest[kSha256DigestSize];
+  hmacSha256(auth.key, kCommandKeySize, fields, sizeof(fields), digest);
+  const char kDigits[] = "0123456789abcdef";
+  for (size_t i = 0; i < kSha256DigestSize; ++i) {
+    code.text[2 * i] = kDigits[digest[i] >> 4];
+    code.text[2 * i + 1] = kDigits[digest[i] & 0x0F];
+  }
+  code.text[kCommandAuthCodeLength] = '\0';
+}
+
+bool readAllClearCommand(const char* text,
+                         size_t length,
+                         const CommandAuth& auth,
+                         AllClearCommand& command) {
+  AllClearCommand read;
+  CommandAuthCode given;
+  if (!parseAllClearCommand(text, length, read, given)) return false;
+  CommandAuthCode expected;
+  writeCommandAuthCode(auth, read, expected);
+  if (!constantTimeEqual(reinterpret_cast<const uint8_t*>(expected.text),
+                         reinterpret_cast<const uint8_t*>(given.text),
+                         kCommandAuthCodeLength)) {
+    return false;
+  }
+  command = read;
+  return true;
+}
+
+bool parseAllClearCommand(const char* text,
+                          size_t length,
+                          AllClearCommand& command,
+                          CommandAuthCode& code) {
   if (text == nullptr || length == 0 || length > kMaxDownlinkCommandLength) return false;
 
   Scanner scanner(text, length);
@@ -96,7 +170,9 @@ bool parseAllClearCommand(const char* text, size_t length, AllClearCommand& comm
   bool hasCommand = false;
   bool hasIssuedAt = false;
   bool hasWadi = false;
+  bool hasAuth = false;
   AllClearCommand read = AllClearCommand();
+  CommandAuthCode readCode = CommandAuthCode();
 
   if (!scanner.take('{')) return false;
   if (!scanner.next('}')) {
@@ -109,6 +185,11 @@ bool parseAllClearCommand(const char* text, size_t length, AllClearCommand& comm
         if (hasKind || !scanner.word(kind, sizeof(kind))) return false;
         if (std::strcmp(kind, kAllClearKind) != 0) return false;
         hasKind = true;
+        continue;
+      }
+      if (std::strcmp(name, "auth") == 0) {
+        if (hasAuth || !scanner.hex(readCode.text, kCommandAuthCodeLength)) return false;
+        hasAuth = true;
         continue;
       }
 
@@ -136,9 +217,10 @@ bool parseAllClearCommand(const char* text, size_t length, AllClearCommand& comm
     } while (scanner.take(','));
   }
   if (!scanner.take('}') || !scanner.atEnd()) return false;
-  if (!(hasVersion && hasKind && hasCommand && hasIssuedAt && hasWadi)) return false;
+  if (!(hasVersion && hasKind && hasCommand && hasIssuedAt && hasWadi && hasAuth)) return false;
 
   command = read;
+  code = readCode;
   return true;
 }
 

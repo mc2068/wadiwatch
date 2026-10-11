@@ -54,7 +54,7 @@
 {"why":"all clear with command number zero","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi_node\":257,\"command\":0}"}
 {"why":"all clear whose command number is not a whole number","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi_node\":257,\"command\":\"41\"}"}
 {"why":"all clear that names a wadi instead of a wadi node","raw":"{\"v\":1,\"kind\":\"all_clear\",\"node\":769,\"counter\":5,\"ts\":1791594000,\"wadi\":1,\"command\":41}"}
-{"why":"the backend's own all clear command, sent up instead of down","raw":"{\"v\":1,\"kind\":\"all_clear\",\"command\":41,\"ts\":1791594000,\"wadi\":1}"}
+{"why":"the backend's own all clear command, sent up instead of down","raw":"{\"v\":1,\"kind\":\"all_clear\",\"command\":41,\"ts\":1791594000,\"wadi\":1,\"auth\":\"25dcfdeac97104c4cff3e9a0a67bf19548b44ddeeefafa95e301db8dbc07a5c4\"}"}
 {"why":"repeated level flag that is not true or false","raw":"{\"v\":1,\"kind\":\"reading\",\"node\":257,\"counter\":1041,\"ts\":1791590400,\"level_cm\":84.5,\"rise_cm_min\":3.2,\"level_repeated\":\"no\"}"}
 {"why":"repeated level flag in an acknowledgement","raw":"{\"v\":1,\"kind\":\"acknowledgement\",\"node\":513,\"counter\":17,\"ts\":1791590462,\"wadi_node\":257,\"alert_level\":\"warning\",\"level_repeated\":false}"}
 {"why":"test from a wadi node","raw":"{\"v\":1,\"kind\":\"test\",\"node\":257,\"counter\":20,\"ts\":1791597600}"}

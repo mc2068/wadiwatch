@@ -25,6 +25,8 @@
 
 using wadiwatch::AlertLevel;
 using wadiwatch::AllClearCommand;
+using wadiwatch::CommandAuth;
+using wadiwatch::CommandAuthCode;
 using wadiwatch::Language;
 using wadiwatch::levelThresholdCm;
 using wadiwatch::NodeId;
@@ -260,9 +262,30 @@ SiteConfig siteWithTwoWadis() {
   return config;
 }
 
+// An authentication code of the right shape, which no key gave: for reading a
+// command's text without asking who sent it.
+const std::string kSomeAuthCode(wadiwatch::kCommandAuthCodeLength, '0');
+
 bool parses(const std::string& text) {
   AllClearCommand command;
-  return parseAllClearCommand(text.data(), text.size(), command);
+  CommandAuthCode code;
+  return parseAllClearCommand(text.data(), text.size(), command, code);
+}
+
+// The text with one part of it replaced, which must be there.
+std::string replaced(const std::string& text, const std::string& part, const std::string& with) {
+  const size_t at = text.find(part);
+  TEST_ASSERT_TRUE_MESSAGE(at != std::string::npos, part.c_str());
+  return text.substr(0, at) + with + text.substr(at + part.size());
+}
+
+// Whether the gateway acts on a command delivered now: whether an all clear packet
+// goes out in the time the gateway needs for one.
+bool actedOn(TestSite& site, const std::string& command) {
+  const size_t before = site.packetsOnAir(PacketKind::AllClear).size();
+  site.uplink.deliver(command);
+  site.runMs(site.allClearSettleMs());
+  return site.packetsOnAir(PacketKind::AllClear).size() > before;
 }
 
 }  // namespace
@@ -1120,8 +1143,7 @@ static void test_a_command_dated_in_the_future_is_not_acted_on() {
   const uint32_t tooFarAhead =
       site.wallClock.unixSeconds() + 2 * site.config.gateway.commandMaxAgeS;
 
-  site.uplink.deliver(
-      TestSite::allClearCommand(1, tooFarAhead, site.config.gateway.wadis[0].id));
+  site.uplink.deliver(site.allClearCommand(1, tooFarAhead, site.config.gateway.wadis[0].id));
   site.runMs(site.allClearSettleMs());
 
   TEST_ASSERT_EQUAL_UINT(0, site.packetsOnAir(PacketKind::AllClear).size());
@@ -1133,8 +1155,8 @@ static void test_a_command_delivered_twice_is_acted_on_once() {
   floodTo(site, upstreamNode(site), AlertLevel::Warning);
   letSmsGoOut(site);
   waterRecedes(site);
-  const std::string command = TestSite::allClearCommand(7, site.wallClock.unixSeconds(),
-                                                        site.config.gateway.wadis[0].id);
+  const std::string command =
+      site.allClearCommand(7, site.wallClock.unixSeconds(), site.config.gateway.wadis[0].id);
 
   site.uplink.deliver(command);
   site.runMs(site.allClearSettleMs());
@@ -1157,7 +1179,7 @@ static void test_a_later_command_with_the_number_of_an_earlier_one_is_acted_on()
   const WadiId wadi = site.config.gateway.wadis[0].id;
   floodTo(site, node, AlertLevel::Warning);
   waterRecedes(site);
-  site.uplink.deliver(TestSite::allClearCommand(1, site.wallClock.unixSeconds(), wadi));
+  site.uplink.deliver(site.allClearCommand(1, site.wallClock.unixSeconds(), wadi));
   site.runMs(site.allClearSettleMs());
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
 
@@ -1166,7 +1188,7 @@ static void test_a_later_command_with_the_number_of_an_earlier_one_is_acted_on()
   floodTo(site, node, AlertLevel::Warning);
   waterRecedes(site);
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
-  site.uplink.deliver(TestSite::allClearCommand(1, site.wallClock.unixSeconds(), wadi));
+  site.uplink.deliver(site.allClearCommand(1, site.wallClock.unixSeconds(), wadi));
   site.runMs(site.allClearSettleMs());
 
   ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
@@ -1181,13 +1203,13 @@ static void test_a_command_the_gateway_cannot_make_sense_of_changes_nothing() {
   const uint32_t now = site.wallClock.unixSeconds();
   const WadiId wadi = site.config.gateway.wadis[0].id;
   const WadiId unknownWadi = static_cast<WadiId>(wadi + 100);
-  const std::string wellFormed = TestSite::allClearCommand(3, now, wadi);
+  const std::string wellFormed = site.allClearCommand(3, now, wadi);
 
   site.uplink.deliver("");
   site.uplink.deliver("all clear");
   site.uplink.deliver("{}");
   site.uplink.deliver(wellFormed.substr(0, wellFormed.size() - 1));
-  site.uplink.deliver(TestSite::allClearCommand(3, now, unknownWadi));
+  site.uplink.deliver(site.allClearCommand(3, now, unknownWadi));
   site.uplink.deliver(std::string(2 * wadiwatch::kMaxDownlinkCommandLength, ' ') + wellFormed);
   site.runMs(site.allClearSettleMs());
   letSmsGoOut(site);
@@ -1197,75 +1219,210 @@ static void test_a_command_the_gateway_cannot_make_sense_of_changes_nothing() {
   TEST_ASSERT_EQUAL_UINT(smsBefore, site.modem.sent().size());
 
   // Control: the well-formed command behind them is acted on.
-  site.uplink.deliver(TestSite::allClearCommand(3, site.wallClock.unixSeconds(), wadi));
+  site.uplink.deliver(site.allClearCommand(3, site.wallClock.unixSeconds(), wadi));
   site.runMs(site.allClearSettleMs());
   TEST_ASSERT_EQUAL_UINT(2, allClearsOnAir(site).size());
+}
+
+// --- Only the backend's commands ---
+
+static void test_a_command_without_an_authentication_code_is_not_acted_on() {
+  TestSite site;
+  floodTo(site, upstreamNode(site), AlertLevel::Warning);
+  letSmsGoOut(site);
+  const size_t smsBefore = site.modem.sent().size();
+  const WadiId wadi = site.config.gateway.wadis[0].id;
+
+  // What anyone can publish who has read the contract and can reach the broker: well
+  // formed, fresh, for a wadi the gateway knows.
+  TEST_ASSERT_FALSE(actedOn(
+      site, TestSite::unsignedAllClearCommand(1, site.wallClock.unixSeconds(), wadi)));
+  // And with something in the place of the code.
+  TEST_ASSERT_FALSE(actedOn(site, TestSite::unsignedAllClearCommand(
+                                      1, site.wallClock.unixSeconds(), wadi,
+                                      kSomeAuthCode.c_str())));
+
+  letSmsGoOut(site);
+  ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
+  TEST_ASSERT_EQUAL_UINT(smsBefore, site.modem.sent().size());
+  // Control: the backend's own command for the same wadi is acted on.
+  TEST_ASSERT_TRUE(actedOn(site, site.allClearCommand(1, site.wallClock.unixSeconds(), wadi)));
+}
+
+static void test_a_command_signed_with_another_key_is_not_acted_on() {
+  TestSite site;
+  floodTo(site, upstreamNode(site), AlertLevel::Warning);
+  const WadiId wadi = site.config.gateway.wadis[0].id;
+  CommandAuth anotherKey = site.commandAuth;
+  anotherKey.key[0] ^= 0x01;
+  // The key every wadi node and siren node holds signs radio packets, not commands:
+  // a node taken from its mast gives nobody the means to command the gateway.
+  CommandAuth siteKey = CommandAuth();
+  for (size_t i = 0; i < wadiwatch::kCommandKeySize && i < wadiwatch::kSiteKeySize; ++i) {
+    siteKey.key[i] = site.config.auth.key[i];
+  }
+
+  TEST_ASSERT_FALSE(actedOn(
+      site, TestSite::allClearCommand(anotherKey, 1, site.wallClock.unixSeconds(), wadi)));
+  TEST_ASSERT_FALSE(actedOn(
+      site, TestSite::allClearCommand(siteKey, 1, site.wallClock.unixSeconds(), wadi)));
+
+  ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
+}
+
+static void test_a_command_changed_after_it_was_signed_is_not_acted_on() {
+  TestSite site(siteWithTwoWadis());
+  const Node first = upstreamNode(site);
+  const Node second = downstreamNode(site);
+  floodTo(site, first, AlertLevel::Warning);
+  floodTo(site, second, AlertLevel::Warning);
+  const WadiId firstWadi = site.config.gateway.wadis[0].id;
+  const WadiId secondWadi = site.config.gateway.wadis[1].id;
+  const uint32_t issuedAt = site.wallClock.unixSeconds();
+  // A command the backend really issued, read off the broker by someone else.
+  const std::string genuine = site.allClearCommand(5, issuedAt, firstWadi);
+
+  // Turned into an all clear for another wadi,
+  const std::string forAnotherWadi =
+      replaced(genuine, "\"wadi\":" + std::to_string(firstWadi),
+               "\"wadi\":" + std::to_string(secondWadi));
+  // given a later date, as it would have to be to end a later event,
+  const std::string datedLater = replaced(genuine, "\"ts\":" + std::to_string(issuedAt),
+                                          "\"ts\":" + std::to_string(issuedAt + 1));
+  // or given another number.
+  const std::string renumbered = replaced(genuine, "\"command\":5", "\"command\":6");
+
+  TEST_ASSERT_FALSE(actedOn(site, forAnotherWadi));
+  TEST_ASSERT_FALSE(actedOn(site, datedLater));
+  TEST_ASSERT_FALSE(actedOn(site, renumbered));
+  ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
+
+  // Control: a command the backend signed for the other wadi is acted on there.
+  TEST_ASSERT_TRUE(
+      actedOn(site, site.allClearCommand(5, site.wallClock.unixSeconds(), secondWadi)));
+  TEST_ASSERT_EQUAL_UINT(0, allClearsFor(site, first).size());
+  TEST_ASSERT_EQUAL_UINT(1, allClearsFor(site, second).size());
+}
+
+static void test_the_committed_command_key_is_not_the_site_key() {
+  const CommandAuth& command = wadiwatch::prototypeCommandAuth();
+  const SiteAuth& site = wadiwatch::prototypeSite().auth;
+  bool same = wadiwatch::kCommandKeySize == wadiwatch::kSiteKeySize;
+  for (size_t i = 0; same && i < wadiwatch::kCommandKeySize; ++i) {
+    same = command.key[i] == site.key[i];
+  }
+  TEST_ASSERT_FALSE(same);
 }
 
 // --- The command, read on its own ---
 
 static void test_the_command_of_the_contract_is_read() {
-  const std::string text = TestSite::allClearCommand(4000000000u, 1791594000u, 3);
+  const CommandAuth& auth = wadiwatch::prototypeCommandAuth();
+  const std::string text = TestSite::allClearCommand(auth, 4000000000u, 1791594000u, 3);
   AllClearCommand command = AllClearCommand();
 
-  TEST_ASSERT_TRUE(parseAllClearCommand(text.data(), text.size(), command));
+  TEST_ASSERT_TRUE(wadiwatch::readAllClearCommand(text.data(), text.size(), auth, command));
 
   TEST_ASSERT_EQUAL_UINT32(4000000000u, command.command);
   TEST_ASSERT_EQUAL_UINT32(1791594000u, command.issuedAt);
   TEST_ASSERT_EQUAL_UINT8(3, command.wadi);
 
   // Field order and white space do not matter.
-  TEST_ASSERT_TRUE(parses(" { \"wadi\" : 3 , \"ts\":1791594000,\n\"command\":12,\"kind\":\"all_clear\",\"v\":1 }\n"));
+  CommandAuthCode code;
+  wadiwatch::writeCommandAuthCode(auth, AllClearCommand{12, 1791594000u, 3}, code);
+  const std::string reordered =
+      std::string(" { \"wadi\" : 3 , \"auth\": \"") + code.text +
+      "\", \"ts\":1791594000,\n\"command\":12,\"kind\":\"all_clear\",\"v\":1 }\n";
+  TEST_ASSERT_TRUE(
+      wadiwatch::readAllClearCommand(reordered.data(), reordered.size(), auth, command));
+  TEST_ASSERT_EQUAL_UINT32(12, command.command);
+}
+
+// The code is HMAC-SHA-256 over the command's fields in the layout of the contract.
+// This vector was worked out with another implementation (Python's hmac module) for
+// the published test key; the backend tests hold the same one.
+static void test_the_authentication_code_is_the_one_the_contract_defines() {
+  CommandAuthCode code;
+  wadiwatch::writeCommandAuthCode(wadiwatch::publishedTestCommandAuth(),
+                                  AllClearCommand{41, 1791593990u, 1}, code);
+
+  TEST_ASSERT_EQUAL_STRING("798ce3d2ad55640ccdeba5e6dead5ae444082d2e1eb6abb258767837b9782f9a",
+                           code.text);
 }
 
 static void test_anything_else_is_refused_whole() {
-  const char* const refused[] = {
+  // Each with an authentication code of the right shape, so that it is refused for
+  // the fault it shows and not for want of a code.
+  const std::string auth = ",\"auth\":\"" + kSomeAuthCode + "\"";
+  const std::string fields =
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3";
+  TEST_ASSERT_TRUE(parses(fields + auth + "}"));
+  const std::string refused[] = {
       // not an object, or not finished
       "",
       "[]",
       "null",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3}}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3,}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + ",}",
       // a field missing
-      "{\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"command\":12,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000}",
+      "{\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000" + auth + "}",
       // another version, another kind
-      "{\"v\":2,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"alert\",\"command\":12,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear_now\",\"command\":12,\"ts\":1791594000,\"wadi\":3}",
+      "{\"v\":2,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"alert\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear_now\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
       // a field given twice, a field the contract does not list
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3,\"wadi\":4}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3,\"wadi_node\":257}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3,\"wadi\":4" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3,\"wadi_node\":257" + auth + "}",
       // values out of range or of the wrong type
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":0,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":4294967296,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":0,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":0}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":256}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":-12,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12.5,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":1e3,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":012,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":\"12\",\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":[3]}",
-      "{\"v\":1,\"kind\":all_clear,\"command\":12,\"ts\":1791594000,\"wadi\":3}",
-      "{\"v\":true,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":0,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":4294967296,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":0,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":0" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":256" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":-12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12.5,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":1e3,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":012,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":\"12\",\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":[3]" + auth + "}",
+      "{\"v\":1,\"kind\":all_clear,\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
+      "{\"v\":true,\"kind\":\"all_clear\",\"command\":12,\"ts\":1791594000,\"wadi\":3" + auth + "}",
   };
-  for (const char* text : refused) {
-    TEST_ASSERT_FALSE_MESSAGE(parses(text), text);
+  for (const std::string& text : refused) {
+    TEST_ASSERT_FALSE_MESSAGE(parses(text), text.c_str());
+  }
+  // An authentication code that is missing, given twice, or not 64 hexadecimal digits
+  // in lower case.
+  const std::string badCodes[] = {
+      "",
+      auth + auth,
+      ",\"auth\":\"" + kSomeAuthCode.substr(1) + "\"",
+      ",\"auth\":\"" + kSomeAuthCode + "0\"",
+      ",\"auth\":\"" + kSomeAuthCode.substr(1) + "A\"",
+      ",\"auth\":\"" + kSomeAuthCode.substr(1) + "g\"",
+      ",\"auth\":12",
+      ",\"auth\":\"\"",
+  };
+  for (const std::string& code : badCodes) {
+    TEST_ASSERT_FALSE_MESSAGE(parses(fields + code + "}"), code.c_str());
   }
   // A command longer than the contract allows, however well formed.
   const std::string padded =
-      std::string(wadiwatch::kMaxDownlinkCommandLength, ' ') + TestSite::allClearCommand(1, 1, 1);
+      std::string(wadiwatch::kMaxDownlinkCommandLength, ' ') +
+      TestSite::allClearCommand(wadiwatch::prototypeCommandAuth(), 1, 1, 1);
   TEST_ASSERT_FALSE(parses(padded));
-  // A command that is refused leaves the caller's copy alone.
+  // A command that is refused leaves the caller's copies alone.
   AllClearCommand untouched = {77, 88, 9};
-  const std::string bad = "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":5}";
-  TEST_ASSERT_FALSE(parseAllClearCommand(bad.data(), bad.size(), untouched));
+  CommandAuthCode untouchedCode = CommandAuthCode();
+  const std::string bad =
+      "{\"v\":1,\"kind\":\"all_clear\",\"command\":12,\"ts\":5" + auth + "}";
+  TEST_ASSERT_FALSE(parseAllClearCommand(bad.data(), bad.size(), untouched, untouchedCode));
+  TEST_ASSERT_EQUAL_STRING("", untouchedCode.text);
   TEST_ASSERT_EQUAL_UINT32(77, untouched.command);
   TEST_ASSERT_EQUAL_UINT32(88, untouched.issuedAt);
   TEST_ASSERT_EQUAL_UINT8(9, untouched.wadi);
@@ -1310,7 +1467,12 @@ int main(int, char**) {
   RUN_TEST(test_a_command_delivered_twice_is_acted_on_once);
   RUN_TEST(test_a_later_command_with_the_number_of_an_earlier_one_is_acted_on);
   RUN_TEST(test_a_command_the_gateway_cannot_make_sense_of_changes_nothing);
+  RUN_TEST(test_a_command_without_an_authentication_code_is_not_acted_on);
+  RUN_TEST(test_a_command_signed_with_another_key_is_not_acted_on);
+  RUN_TEST(test_a_command_changed_after_it_was_signed_is_not_acted_on);
+  RUN_TEST(test_the_committed_command_key_is_not_the_site_key);
   RUN_TEST(test_the_command_of_the_contract_is_read);
+  RUN_TEST(test_the_authentication_code_is_the_one_the_contract_defines);
   RUN_TEST(test_anything_else_is_refused_whole);
   return UNITY_END();
 }

@@ -13,6 +13,14 @@ Settings come from environment variables, all optional:
   WADIWATCH_MQTT_PORT      broker port (default 1883)
   WADIWATCH_MQTT_USERNAME  broker sign-in, if the broker asks for one
   WADIWATCH_MQTT_PASSWORD
+  WADIWATCH_COMMAND_KEY    the command key shared with the gateway, as 64
+                           hexadecimal digits: every all clear command carries
+                           an authentication code made with it, and the gateway
+                           acts on no other. Without it the published test key
+                           is used, which only a bench gateway built from the
+                           repository as it is accepts. A real key is a secret:
+                           set it here and in the gateway's local key file,
+                           and never commit it
   WADIWATCH_GATEWAY        set to "simulated" to try the all clear without a
                            gateway: a stand-in answers the command the way the
                            gateway reports an all clear, and nothing else
@@ -31,6 +39,7 @@ import uvicorn
 
 from .app import create_app
 from .backend import Backend
+from .downlink import TEST_COMMAND_KEY, command_key_from
 from .mqtt import DEFAULT_PORT, MqttUplink
 from .simulated_gateway import SimulatedGateway
 from .site import BACKEND_DIR, DEFAULT_SITE_FILE, load_site
@@ -45,7 +54,13 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     env = os.environ
     site = load_site(env.get("WADIWATCH_SITE", DEFAULT_SITE_FILE))
-    backend = Backend(env.get("WADIWATCH_DB", DEFAULT_DB), site)
+    command_key = command_key_from(env.get("WADIWATCH_COMMAND_KEY"))
+    if command_key == TEST_COMMAND_KEY:
+        log.warning(
+            "all clear commands are signed with the published test key: "
+            "set WADIWATCH_COMMAND_KEY for a real gateway"
+        )
+    backend = Backend(env.get("WADIWATCH_DB", DEFAULT_DB), site, command_key=command_key)
     uplink = None
     if env.get("WADIWATCH_MQTT_HOST"):
         uplink = MqttUplink(
@@ -58,7 +73,7 @@ def main():
         # Commands go down the connection the messages come up.
         backend.downlink = uplink.send_command
     elif env.get("WADIWATCH_GATEWAY") == SIMULATED:
-        backend.downlink = SimulatedGateway(backend, time.time)
+        backend.downlink = SimulatedGateway(backend, time.time, command_key)
         log.warning("the gateway is simulated: an all clear stops no siren and sends no SMS")
     uvicorn.run(
         create_app(backend, uplink, secure_cookies=env.get("WADIWATCH_SECURE_COOKIES") == "1"),

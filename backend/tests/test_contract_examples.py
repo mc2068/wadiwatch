@@ -13,7 +13,7 @@ import pytest
 
 from conftest import backend_commands, gateway_output, valid_examples
 from wadiwatch_backend.contract import KINDS
-from wadiwatch_backend.downlink import all_clear_command, parse_command
+from wadiwatch_backend.downlink import TEST_COMMAND_KEY, all_clear_command, parse_command
 
 
 @pytest.mark.parametrize("raw", gateway_output())
@@ -52,16 +52,21 @@ def test_gateway_output_ingested_in_order_shows_through_the_api(harness, site):
     assert {node["alert_level"] for node in nodes.values()} == {"none"}
 
 
-# What the backend sends down: docs/gateway-contract/backend-commands.jsonl. The firmware
-# tests fail unless the gateway core reads every line of it, and take the command of
-# their contract scenario from it.
+# What the backend sends down: docs/gateway-contract/backend-commands.jsonl, signed with
+# the published test command key. The firmware tests fail unless the gateway core,
+# holding that key, reads every line of it, and take the command of their contract
+# scenario from it. So the two sides also agree on the test key and on how a command's
+# authentication code is computed.
 
 
 @pytest.mark.parametrize("raw", backend_commands())
 def test_command_of_the_shared_examples_is_what_the_backend_sends_byte_for_byte(raw):
-    command = parse_command(raw)
+    command = parse_command(raw, TEST_COMMAND_KEY)
 
-    assert all_clear_command(command["command"], command["ts"], command["wadi"]) == raw
+    assert (
+        all_clear_command(command["command"], command["ts"], command["wadi"], TEST_COMMAND_KEY)
+        == raw
+    )
 
 
 def test_the_shared_commands_are_the_ones_the_gateway_output_answers(site):

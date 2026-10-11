@@ -79,6 +79,7 @@ ArduinoRandom randomSource;
 // The committed recipient list holds fake numbers only.
 wadiwatch::Gateway gateway(wadiwatch::prototypeSite().gateway,
                            wadiwatch::prototypeSite().auth,
+                           wadiwatch::prototypeCommandAuth(),
                            wadiwatch::prototypeRecipients(),
                            espClock,
                            radio,

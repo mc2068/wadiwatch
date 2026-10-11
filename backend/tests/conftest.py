@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from wadiwatch_backend.app import create_app
 from wadiwatch_backend.backend import Backend
 from wadiwatch_backend.contract import CONTRACT_VERSION
-from wadiwatch_backend.downlink import parse_command
+from wadiwatch_backend.downlink import TEST_COMMAND_KEY, parse_command
 from wadiwatch_backend.site import DEFAULT_SITE_FILE, load_site
 
 # Fixtures for sign-in and the alert log (visitor, officer, signed_in, ...) are in officer_support.py.
@@ -43,10 +43,14 @@ class GatewayLink:
 
     It records the commands handed over and does nothing with them: a test
     says what the gateway does next (`Harness.gateway_relays`). A command that
-    is not worded as the contract words it fails the test that sent it.
+    is not worded as the contract words it, or does not carry the
+    authentication code of the gateway's command key, fails the test that
+    sent it.
     """
 
-    def __init__(self):
+    def __init__(self, command_key=TEST_COMMAND_KEY):
+        # The key this gateway shares with the backend.
+        self.command_key = command_key
         # False: the broker cannot be reached, nothing is handed over.
         self.reachable = True
         # The commands handed over, as sent and as read back.
@@ -56,7 +60,7 @@ class GatewayLink:
     def __call__(self, payload):
         if not self.reachable:
             return False
-        self.commands.append(parse_command(payload))
+        self.commands.append(parse_command(payload, self.command_key))
         self.raw.append(payload)
         return True
 
@@ -64,21 +68,27 @@ class GatewayLink:
 class Harness:
     """One backend over one database file, restartable like the real process."""
 
-    def __init__(self, db_path, site, clock):
+    def __init__(self, db_path, site, clock, command_key=TEST_COMMAND_KEY):
         self.db_path = db_path
         self.site = site
         self.clock = clock
+        # The key the backend signs its commands with, and its gateway checks them against.
+        self.command_key = command_key
         self._counters = {}
         self.backend = None
         # Outlives a restart of the backend, as the broker and the gateway do.
-        self.gateway = GatewayLink()
+        self.gateway = GatewayLink(command_key)
         self.restart()
 
     def restart(self):
         """Stop the running backend and start a new one on the same file."""
         self.stop()
         self.backend = Backend(
-            self.db_path, self.site, clock=self.clock, downlink=self.gateway
+            self.db_path,
+            self.site,
+            clock=self.clock,
+            downlink=self.gateway,
+            command_key=self.command_key,
         )
         self.client = TestClient(create_app(self.backend))
 

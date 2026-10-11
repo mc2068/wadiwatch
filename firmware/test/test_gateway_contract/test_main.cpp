@@ -7,9 +7,11 @@
 // backend cannot drift apart without a test failing on one side.
 //
 // The same directory holds backend-commands.jsonl: what the backend sends down to the
-// gateway. This test fails if the gateway core refuses a line of it, and the scenario
-// below takes its all clear command from it word for word; the backend tests fail if
-// the backend does not produce those lines byte for byte.
+// gateway, signed with the published test command key. This test fails if the gateway
+// core, holding that key, refuses a line of it, and the scenario below takes its all
+// clear command from it word for word; the backend tests fail if the backend does not
+// produce those lines byte for byte. So the two sides also agree on the test key and
+// on how a command's authentication code is computed.
 //
 // After an intended change to the messages, rewrite the file and then run the backend
 // tests:
@@ -32,6 +34,7 @@
 
 using wadiwatch::AlertLevel;
 using wadiwatch::AllClearCommand;
+using wadiwatch::CommandAuth;
 using wadiwatch::GatewayConfig;
 using wadiwatch::NodeId;
 using wadiwatch::Packet;
@@ -132,6 +135,10 @@ std::vector<std::string> backendCommands() {
 // not change when the wadi nodes or the siren node change what they send.
 std::vector<std::string> gatewayOutput() {
   QuietSite site;
+  // The shared commands are signed with the published test key, whatever key a local
+  // key file gives the gateway of this checkout.
+  site.commandAuth = wadiwatch::publishedTestCommandAuth();
+  site.restartGateway();
   const GatewayConfig& gateway = site.config.gateway;
   auto& wadiNode = site.wadiNodeOnAir;
   auto& downstreamWadiNode = site.downstreamWadiNodeOnAir;
@@ -219,7 +226,8 @@ std::vector<std::string> gatewayOutput() {
   // the time it is dated.
   const std::string command = backendCommands().front();
   AllClearCommand issued;
-  TEST_ASSERT_TRUE(wadiwatch::parseAllClearCommand(command.data(), command.size(), issued));
+  TEST_ASSERT_TRUE(wadiwatch::readAllClearCommand(command.data(), command.size(),
+                                                  site.commandAuth, issued));
   TEST_ASSERT_TRUE_MESSAGE(issued.issuedAt >= site.wallClock.unixSeconds(),
                            "the command in backend-commands.jsonl is dated before the scenario "
                            "reaches it: give it a later ts");
@@ -295,16 +303,32 @@ static void test_the_all_clears_in_the_gateway_output_are_the_gateway_s_own_for_
 }
 
 static void test_the_gateway_reads_every_command_of_the_shared_examples() {
+  const CommandAuth& testKey = wadiwatch::publishedTestCommandAuth();
   const std::vector<std::string> commands = backendCommands();
   TEST_ASSERT_FALSE(commands.empty());
   for (const std::string& command : commands) {
     AllClearCommand read;
+    // The backend's authentication code is the one the gateway works out.
     TEST_ASSERT_TRUE_MESSAGE(
-        wadiwatch::parseAllClearCommand(command.data(), command.size(), read), command.c_str());
+        wadiwatch::readAllClearCommand(command.data(), command.size(), testKey, read),
+        command.c_str());
     // And the harness that stands for the backend in the scenario tests words its
     // commands exactly so.
     TEST_ASSERT_EQUAL_STRING(
-        command.c_str(), TestSite::allClearCommand(read.command, read.issuedAt, read.wadi).c_str());
+        command.c_str(),
+        TestSite::allClearCommand(testKey, read.command, read.issuedAt, read.wadi).c_str());
+  }
+}
+
+// A gateway holding any other key acts on none of them.
+static void test_the_shared_commands_are_refused_under_another_key() {
+  CommandAuth anotherKey = wadiwatch::publishedTestCommandAuth();
+  anotherKey.key[wadiwatch::kCommandKeySize - 1] ^= 0x80;
+  for (const std::string& command : backendCommands()) {
+    AllClearCommand read;
+    TEST_ASSERT_FALSE_MESSAGE(
+        wadiwatch::readAllClearCommand(command.data(), command.size(), anotherKey, read),
+        command.c_str());
   }
 }
 
@@ -343,6 +367,7 @@ int main(int, char**) {
   RUN_TEST(test_the_gateway_output_file_is_what_the_gateway_core_produces);
   RUN_TEST(test_the_all_clears_in_the_gateway_output_are_the_gateway_s_own_for_every_wadi_node);
   RUN_TEST(test_the_gateway_reads_every_command_of_the_shared_examples);
+  RUN_TEST(test_the_shared_commands_are_refused_under_another_key);
   RUN_TEST(test_the_gateway_output_covers_every_message_kind);
   RUN_TEST(test_the_gateway_output_covers_every_node_the_gateway_hears);
   return UNITY_END();

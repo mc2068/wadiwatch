@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from wadiwatch_backend.downlink import all_clear_command
+from wadiwatch_backend.downlink import TEST_COMMAND_KEY, all_clear_command, command_auth_code
 from wadiwatch_backend.mqtt import MqttUplink
 
 
@@ -94,7 +94,7 @@ def uplink_with(harness, client):
 
 def test_a_command_is_published_on_the_downlink_topic_at_least_once_and_not_retained(harness):
     client = FakeMqttClient(connected=True)
-    command = all_clear_command(command=3, ts=int(harness.clock()), wadi=1)
+    command = all_clear_command(command=3, ts=int(harness.clock()), wadi=1, key=TEST_COMMAND_KEY)
 
     sent = uplink_with(harness, client).send_command(command)
 
@@ -108,7 +108,7 @@ def test_a_command_is_published_on_the_downlink_topic_at_least_once_and_not_reta
 def test_a_command_is_not_handed_to_a_client_that_has_no_connection(harness):
     # The client library would keep it and send it whenever the broker came back.
     client = FakeMqttClient(connected=False)
-    command = all_clear_command(command=3, ts=int(harness.clock()), wadi=1)
+    command = all_clear_command(command=3, ts=int(harness.clock()), wadi=1, key=TEST_COMMAND_KEY)
 
     assert uplink_with(harness, client).send_command(command) is False
     assert client.published == []
@@ -118,7 +118,7 @@ def test_a_command_is_not_handed_to_a_client_that_has_no_connection(harness):
 
 def test_a_command_the_client_could_not_publish_is_reported_as_not_sent(harness):
     client = FakeMqttClient(connected=True, rc=4)
-    command = all_clear_command(command=3, ts=int(harness.clock()), wadi=1)
+    command = all_clear_command(command=3, ts=int(harness.clock()), wadi=1, key=TEST_COMMAND_KEY)
 
     assert uplink_with(harness, client).send_command(command) is False
 
@@ -143,4 +143,7 @@ def test_the_adapter_sends_what_the_backend_issues(harness, signed_in, clock, si
         "command": response.json()["command"],
         "ts": int(clock()),
         "wadi": wadi.id,
+        "auth": command_auth_code(
+            TEST_COMMAND_KEY, response.json()["command"], int(clock()), wadi.id
+        ),
     }

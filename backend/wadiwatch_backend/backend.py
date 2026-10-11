@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from . import all_clear, health
 from .alert_log import ALERT, KINDS as ALERT_LOG_KINDS, build_alert_log
 from .contract import ALERT_LEVELS, WADI_NODE, ContractError, parse_message
-from .downlink import all_clear_command
+from .downlink import TEST_COMMAND_KEY, all_clear_command
 from .officers import Officers
 from .store import MessageStore
 
@@ -56,17 +56,24 @@ class GatewayUnreachable(Exception):
 
 
 class Backend:
-    def __init__(self, db_path, site, clock=time.time, downlink=None):
+    def __init__(
+        self, db_path, site, clock=time.time, downlink=None, command_key=TEST_COMMAND_KEY
+    ):
         """`downlink`, if given, sends one command towards the gateway.
 
         It is called with the command as text and returns True once the command
         has been handed over (to the MQTT broker in production). Without one,
         or when it returns False, no all clear can be issued.
+
+        `command_key` is the secret this backend shares with its gateway: every
+        command carries an authentication code made with it. Left out, it is
+        the published test key, which a real gateway does not hold.
         """
         self.site = site
         self._store = MessageStore(db_path)
         self._clock = clock
         self.downlink = downlink
+        self._command_key = command_key
         # Accounts, sessions and officer acknowledgements (ticket #13).
         self.officers = Officers(db_path, clock)
 
@@ -164,7 +171,7 @@ class Backend:
             raise GatewayUnreachable("the backend has no connection to the gateway")
 
         command = self._store.add_command(wadi.id, officer, now)
-        if not self.downlink(all_clear_command(command, int(now), wadi.id)):
+        if not self.downlink(all_clear_command(command, int(now), wadi.id, self._command_key)):
             # The row stays, marked as not sent: this number is not used again.
             raise GatewayUnreachable("the command could not be sent to the gateway")
         self._store.mark_command_sent(command)
