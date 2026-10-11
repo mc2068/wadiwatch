@@ -328,7 +328,7 @@ static void test_a_reading_is_forwarded_with_everything_the_packet_carries() {
   // Millimetres on the air, centimetres in the message.
   TEST_ASSERT_EQUAL_STRING(
       (messageStart(sent, receivedAt) +
-       R"(,"level_cm":84.5,"rise_cm_min":3.2,"rain_mm":12.4,"storm_mode":true,"alert_level":"watch"})")
+       R"(,"level_cm":84.5,"rise_cm_min":3.2,"rain_mm":12.4,"storm_mode":true,"alert_level":"watch","level_repeated":false})")
           .c_str(),
       site.uplink.published()[0].c_str());
 }
@@ -341,7 +341,7 @@ static void test_a_reading_of_a_falling_dry_wadi_is_forwarded_exactly() {
 
   TEST_ASSERT_EQUAL_STRING(
       (messageStart(sent, receivedAt) +
-       R"(,"level_cm":0.7,"rise_cm_min":-0.4,"rain_mm":0.0,"storm_mode":false,"alert_level":"none"})")
+       R"(,"level_cm":0.7,"rise_cm_min":-0.4,"rain_mm":0.0,"storm_mode":false,"alert_level":"none","level_repeated":false})")
           .c_str(),
       site.uplink.published().back().c_str());
 }
@@ -357,7 +357,7 @@ static void test_the_largest_values_a_reading_can_carry_are_forwarded_exactly() 
 
   TEST_ASSERT_EQUAL_STRING(
       (messageStart(sent, receivedAt) +
-       R"(,"level_cm":6553.5,"rise_cm_min":-3276.8,"rain_mm":6553.5,"storm_mode":false,"alert_level":"evacuate"})")
+       R"(,"level_cm":6553.5,"rise_cm_min":-3276.8,"rain_mm":6553.5,"storm_mode":false,"alert_level":"evacuate","level_repeated":false})")
           .c_str(),
       site.uplink.published().back().c_str());
 }
@@ -374,7 +374,7 @@ static void test_an_alert_is_forwarded_with_the_level_and_rate_of_rise_behind_it
   TEST_ASSERT_EQUAL_UINT(1, site.uplink.published().size());
   TEST_ASSERT_EQUAL_STRING(
       (messageStart(sent, receivedAt) +
-       R"(,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1,"refresh":false})")
+       R"(,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1,"refresh":false,"level_repeated":false})")
           .c_str(),
       site.uplink.published()[0].c_str());
 }
@@ -438,9 +438,34 @@ static void test_a_wadi_node_heartbeat_is_forwarded_with_its_health_and_last_lev
   TEST_ASSERT_EQUAL_UINT(1, site.uplink.published().size());
   TEST_ASSERT_EQUAL_STRING(
       (messageStart(sent, receivedAt) + ",\"battery_mv\":" + number(battery) +
-       R"(,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":84.5,"discards":2,"refresh_lost":false})")
+       R"(,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":84.5,"level_repeated":false,"discards":2,"refresh_lost":false})")
           .c_str(),
       site.uplink.published()[0].c_str());
+}
+
+// A wadi node whose sensor gives no usable reading keeps the level it last measured and
+// goes on sending it. The backend must be able to tell that level from one just measured.
+static void test_a_level_the_node_could_not_measure_again_is_forwarded_as_repeated() {
+  QuietSite site;
+  Packet lastReading = reading(845, 0);
+  lastReading.reading.levelRepeated = true;
+  Packet alertRefresh = alert(AlertLevel::Warning);
+  alertRefresh.alert.levelMm = 845;
+  alertRefresh.alert.refresh = true;
+  alertRefresh.alert.levelRepeated = true;
+  Packet lastLevel = heartbeat(lowBatteryMillivolts(site, site.wadiNodeOnAir.id));
+  lastLevel.heartbeat.hasLastLevel = true;
+  lastLevel.heartbeat.lastLevelMm = 845;
+  lastLevel.heartbeat.lastLevelRepeated = true;
+
+  site.transmit(site.wadiNodeOnAir, lastReading);
+  site.transmit(site.wadiNodeOnAir, alertRefresh);
+  site.transmit(site.wadiNodeOnAir, lastLevel);
+
+  TEST_ASSERT_EQUAL_UINT(3, site.uplink.published().size());
+  for (const std::string& message : site.uplink.published()) {
+    TEST_ASSERT_TRUE_MESSAGE(flagField(message, "level_repeated"), message.c_str());
+  }
 }
 
 static void test_a_siren_node_heartbeat_is_forwarded_with_its_flags_and_no_level() {
@@ -1154,6 +1179,7 @@ int main(int, char**) {
   RUN_TEST(test_every_alert_level_is_forwarded_under_its_contract_name);
   RUN_TEST(test_an_acknowledgement_is_forwarded_naming_the_alert_it_answers);
   RUN_TEST(test_a_wadi_node_heartbeat_is_forwarded_with_its_health_and_last_level);
+  RUN_TEST(test_a_level_the_node_could_not_measure_again_is_forwarded_as_repeated);
   RUN_TEST(test_a_siren_node_heartbeat_is_forwarded_with_its_flags_and_no_level);
   RUN_TEST(test_a_battery_below_the_threshold_of_its_node_is_reported_as_low);
   RUN_TEST(test_the_second_wadi_node_is_judged_against_a_battery_threshold_of_its_own);

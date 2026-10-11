@@ -169,6 +169,7 @@ size_t writeUplinkMessage(const Packet& packet,
       message.tenths("rain_mm", reading.rainfallTenthsMm);
       message.flag("storm_mode", reading.stormMode);
       message.text("alert_level", alertLevel);
+      message.flag("level_repeated", reading.levelRepeated);
       break;
     }
     case PacketKind::Alert: {
@@ -179,6 +180,7 @@ size_t writeUplinkMessage(const Packet& packet,
       message.tenths("level_cm", alert.levelMm);
       message.tenths("rise_cm_min", alert.rateOfRiseMmPerMin);
       message.flag("refresh", alert.refresh);
+      message.flag("level_repeated", alert.levelRepeated);
       break;
     }
     case PacketKind::Acknowledgement: {
@@ -198,7 +200,10 @@ size_t writeUplinkMessage(const Packet& packet,
                    isLowBattery(config, packet.sender, heartbeat.batteryMillivolts));
       message.flag("tamper", heartbeat.tamper);
       // A node that has measured no level has none to report.
-      if (heartbeat.hasLastLevel) message.tenths("level_cm", heartbeat.lastLevelMm);
+      if (heartbeat.hasLastLevel) {
+        message.tenths("level_cm", heartbeat.lastLevelMm);
+        message.flag("level_repeated", heartbeat.lastLevelRepeated);
+      }
       message.number("discards", heartbeat.discardedReadings);
       message.flag("refresh_lost", heartbeat.alertRefreshLost);
       break;

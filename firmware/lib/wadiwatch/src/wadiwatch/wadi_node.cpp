@@ -142,7 +142,9 @@ void WadiNode::measure(uint64_t nowMs) {
   discardedReadings_ = measurement.discardedPings >= kMaxDiscardedReadings - discardedReadings_
                            ? kMaxDiscardedReadings
                            : static_cast<uint8_t>(discardedReadings_ + measurement.discardedPings);
-  // Too few usable pings: the node keeps the level it last measured.
+  // Too few usable pings: the node keeps the level it last measured, and says in
+  // whatever it sends that it is repeating it.
+  levelMeasured_ = measurement.hasLevel;
   if (!measurement.hasLevel) return;
 
   levelCm_ = measurement.levelCm;
@@ -262,6 +264,7 @@ void WadiNode::sendAlert(bool refresh) {
   packet.alert.alertLevel = alertLevel_;
   packet.alert.refresh = refresh;
   packet.alert.levelMm = levelMm(levelCm_);
+  packet.alert.levelRepeated = !levelMeasured_;
   packet.alert.rateOfRiseMmPerMin = rateMmPerMin(rise_.rateCmPerMin());
   // Every alert goes out several times. The further transmissions are these same
   // bytes: a receiver acts on the first copy it hears and refuses the rest.
@@ -283,6 +286,7 @@ void WadiNode::sendReading(uint64_t nowMs) {
   Packet packet = Packet();
   packet.kind = PacketKind::Reading;
   packet.reading.levelMm = levelMm(levelCm_);
+  packet.reading.levelRepeated = !levelMeasured_;
   packet.reading.rateOfRiseMmPerMin = rateMmPerMin(rise_.rateCmPerMin());
   packet.reading.rainfallTenthsMm = rainTenthsMm(rain_.rainMm(nowMs));
   packet.reading.alertLevel = alertLevel_;
@@ -298,6 +302,7 @@ void WadiNode::sendHeartbeat() {
   packet.heartbeat.tamper = health_.tamperDetected();
   packet.heartbeat.hasLastLevel = hasLevel_;
   packet.heartbeat.lastLevelMm = levelMm(levelCm_);
+  packet.heartbeat.lastLevelRepeated = hasLevel_ && !levelMeasured_;
   // Each heartbeat reports the readings discarded since the one before.
   packet.heartbeat.discardedReadings = discardedReadings_;
   discardedReadings_ = 0;

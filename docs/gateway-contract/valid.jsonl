@@ -5,6 +5,10 @@
 {"v":1,"kind":"alert","node":258,"counter":89,"ts":1791590461,"alert_level":"none"}
 {"v":1,"kind":"alert","node":257,"counter":1044,"ts":1791590520,"alert_level":"evacuate","level_cm":152.0,"rise_cm_min":4.8}
 {"v":1,"kind":"alert","node":257,"counter":1046,"ts":1791590640,"alert_level":"evacuate","level_cm":150.5,"rise_cm_min":-0.4,"refresh":true}
+{"v":1,"kind":"reading","node":257,"counter":1047,"ts":1791590700,"level_cm":150.5,"rise_cm_min":0.0,"rain_mm":0.0,"storm_mode":true,"alert_level":"evacuate","level_repeated":true}
+{"v":1,"kind":"alert","node":257,"counter":1048,"ts":1791590701,"alert_level":"evacuate","level_cm":150.5,"rise_cm_min":0.0,"refresh":true,"level_repeated":true}
+{"v":1,"kind":"heartbeat","node":257,"counter":1049,"ts":1791590702,"battery_mv":3920,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":150.5,"level_repeated":true,"discards":255}
+{"v":1,"kind":"heartbeat","node":258,"counter":90,"ts":1791590703,"battery_mv":3920,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":12.0,"level_repeated":false,"discards":0}
 {"v":1,"kind":"acknowledgement","node":513,"counter":17,"ts":1791590462,"wadi_node":257,"alert_level":"warning"}
 {"v":1,"kind":"acknowledgement","node":513,"counter":18,"ts":1791590522,"wadi_node":257,"alert_level":"evacuate","alert_counter":1044}
 {"v":1,"kind":"heartbeat","node":257,"counter":1043,"ts":1791590500,"battery_mv":3920,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":84.5,"discards":2}

@@ -174,8 +174,10 @@ std::vector<std::string> gatewayOutput() {
   site.transmit(sirenNode, acknowledgement(evacuate));
   site.runMinutes(1);
 
-  // A healthy wadi node; a second one low on battery; a siren node low on battery,
-  // opened, that lost the refresh. Each battery is judged by its own node's threshold.
+  // A healthy wadi node; a second one low on battery whose level sensor gives no
+  // usable reading any more, so that it repeats the last level it measured; a siren
+  // node low on battery, opened, that lost the refresh. Each battery is judged by its
+  // own node's threshold.
   Packet wadiNodeHeartbeat = Packet();
   wadiNodeHeartbeat.kind = PacketKind::Heartbeat;
   wadiNodeHeartbeat.heartbeat.batteryMillivolts =
@@ -193,6 +195,7 @@ std::vector<std::string> gatewayOutput() {
   downstreamHeartbeat.heartbeat.signalStrengthDbm = -104;
   downstreamHeartbeat.heartbeat.hasLastLevel = true;
   downstreamHeartbeat.heartbeat.lastLevelMm = 1090;
+  downstreamHeartbeat.heartbeat.lastLevelRepeated = true;
   site.transmit(downstreamWadiNode, downstreamHeartbeat);
 
   Packet sirenNodeHeartbeat = Packet();
@@ -235,7 +238,9 @@ std::vector<std::string> gatewayOutput() {
   // the gateway has held it long enough, and again in answer to its heartbeat. Then
   // the node says that it holds no alert level either.
   site.runMs(site.allClearSettleMs());
+  // Its sensor measures again.
   downstreamHeartbeat.heartbeat.lastLevelMm = 240;
+  downstreamHeartbeat.heartbeat.lastLevelRepeated = false;
   site.transmit(downstreamWadiNode, downstreamHeartbeat);
   site.transmit(downstreamWadiNode, reading(240, -8, 0, AlertLevel::None, false));
   site.runMs(site.allClearSettleMs());

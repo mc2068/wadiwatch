@@ -90,6 +90,10 @@ class WadiNode {
   uint32_t tipsCounted_ = 0;
   bool hasLevel_ = false;
   float levelCm_ = 0;
+  // The latest measurement gave a level: levelCm_ is how the wadi stands now, as far
+  // as the node can tell. False before the first measurement and after one that gave
+  // none, when levelCm_ only repeats what was measured earlier.
+  bool levelMeasured_ = false;
   // A storm-mode measurement has been taken and not yet sent as a reading. The
   // reading of a measurement that raised an alert waits for the alert's last
   // transmission.

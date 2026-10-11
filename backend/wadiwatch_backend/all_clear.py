@@ -17,9 +17,16 @@ site).
   missed heartbeat intervals. A wadi node in dry mode is one that has found
   its level below the Watch threshold: it goes to storm mode, and reports, as
   soon as it does not.
-- The time below the threshold counts from the first level reported below it
-  after the last one at or above it, on the gateway's clock (`ts`), so levels
-  forwarded late after an uplink outage count for when they were measured.
+- A level must have been measured. A wadi node whose sensor gives no usable
+  reading keeps the last level it measured and goes on sending it, in every
+  alert refresh and heartbeat, marked as repeated (`level_repeated`). Such a
+  report proves that the node is alive and nothing about the water: while it
+  is the latest the all clear is refused, and the time the node could not
+  measure does not count towards the quiet period.
+- The time below the threshold counts from the first level measured below it
+  after the last report that was at or above it or was not measured, on the
+  gateway's clock (`ts`), so levels forwarded late after an uplink outage count
+  for when they were measured.
 
 A level is whatever a wadi node reported: in a reading, behind an alert, or in
 a heartbeat.
@@ -30,6 +37,7 @@ from .health import MISSED_INTERVALS, REFRESHED_ALERT_LEVELS
 # Why a wadi node stands in the way of the all clear.
 NO_LEVEL = "no_level"
 SILENT = "silent"
+NOT_MEASURING = "not_measuring"
 AT_OR_ABOVE_WATCH = "at_or_above_watch"
 BELOW_WATCH_TOO_RECENTLY = "below_watch_too_recently"
 
@@ -69,14 +77,25 @@ def judge(reader, site, wadi, now, gateway, alert_levels):
 
 def _judge_node(reader, site, node, now, alert_level):
     watch_cm = node.watch_level_cm
+    # The latest report that carries a level, measured or repeated.
     latest = None
+    # When the node last measured a level.
+    measured_ts = None
     below_since = None
-    for ts, level_cm in reader.level_reports(node.id):
+    # Whether the reports looked at so far, newest first, are all of a level
+    # measured below the threshold.
+    unbroken = True
+    for ts, level_cm, measured in reader.level_reports(node.id):
         if latest is None:
-            latest = (ts, level_cm)
-        if level_cm >= watch_cm:
+            latest = (ts, level_cm, measured)
+        if measured and measured_ts is None:
+            measured_ts = ts
+        if not measured or level_cm >= watch_cm:
+            unbroken = False
+        if unbroken:
+            below_since = ts
+        elif measured_ts is not None:
             break
-        below_since = ts
 
     judged = {
         "id": node.id,
@@ -84,6 +103,9 @@ def _judge_node(reader, site, node, now, alert_level):
         "watch_level_cm": watch_cm,
         "level_cm": None if latest is None else latest[1],
         "level_ts": None if latest is None else latest[0],
+        # When the node last measured a level; earlier than level_ts while it only
+        # repeats one, None if it has never measured.
+        "measured_ts": measured_ts,
         # Since when the level has been below the Watch threshold, and from when
         # that is long enough. Both None unless the latest level is below it.
         "below_since": None,
@@ -97,7 +119,7 @@ def _judge_node(reader, site, node, now, alert_level):
         judged["refusal"] = f"{node.name} has not reported a water level."
         return judged
 
-    level_ts, level_cm = latest
+    level_ts, level_cm, measured = latest
     if alert_level in REFRESHED_ALERT_LEVELS:
         expected_interval_s = site.alert_refresh_interval_s
     else:
@@ -107,6 +129,18 @@ def _judge_node(reader, site, node, now, alert_level):
         judged["refusal"] = (
             f"{node.name} last reported its level {_duration(now - level_ts)} ago, "
             "which is too long ago to rely on."
+        )
+        return judged
+
+    if not measured:
+        judged["reason"] = NOT_MEASURING
+        if measured_ts is None:
+            since = "has never measured its water level"
+        else:
+            since = f"has not measured its water level for {_duration(now - measured_ts)}"
+        judged["refusal"] = (
+            f"{node.name} {since}: its level sensor gives no usable reading, and the "
+            "level it reports is an old one."
         )
         return judged
 

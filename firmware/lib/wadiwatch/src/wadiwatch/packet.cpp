@@ -16,13 +16,15 @@ namespace {
 //   4-7    message counter
 //   8-15   payload, by kind (unused bytes are zero):
 //            reading          level mm (2), rate of rise mm/min (2), rainfall 0.1 mm (2),
-//                             alert level (1), flags (1)
+//                             alert level (1), flags (1): storm mode 0x01,
+//                             level repeated 0x02
 //            alert            alert level (1), level mm (2), rate of rise mm/min (2),
-//                             flags (1): alert refresh 0x01
+//                             flags (1): alert refresh 0x01, level repeated 0x02
 //            acknowledgement  alert sender (2), alert counter (4), alert level (1)
 //            heartbeat        battery mV (2), signal dBm (2), last level mm (2),
 //                             discarded readings (1), flags (1): tamper 0x01,
-//                             alert refresh lost 0x02, has last level 0x04
+//                             alert refresh lost 0x02, has last level 0x04,
+//                             last level repeated 0x08
 //            all clear        wadi node identifier (2), command (4)
 //            test             nothing
 //   16-23  authentication code: HMAC-SHA-256 of bytes 0-15 under the site key,
@@ -42,10 +44,13 @@ static_assert(kAuthCodeOffset == kPacketContentSize,
 static_assert(kPacketSize <= kMaxPacketSize, "a packet must fit a receive buffer");
 
 constexpr uint8_t kReadingFlagStormMode = 0x01;
+constexpr uint8_t kReadingFlagLevelRepeated = 0x02;
 constexpr uint8_t kAlertFlagRefresh = 0x01;
+constexpr uint8_t kAlertFlagLevelRepeated = 0x02;
 constexpr uint8_t kHeartbeatFlagTamper = 0x01;
 constexpr uint8_t kHeartbeatFlagAlertRefreshLost = 0x02;
 constexpr uint8_t kHeartbeatFlagHasLastLevel = 0x04;
+constexpr uint8_t kHeartbeatFlagLastLevelRepeated = 0x08;
 
 constexpr uint32_t kCounterMax = 0xFFFFFFFFu;
 
@@ -78,7 +83,8 @@ bool writePayload(const Packet& packet, uint8_t* payload) {
       put16(payload + 2, static_cast<uint16_t>(reading.rateOfRiseMmPerMin));
       put16(payload + 4, reading.rainfallTenthsMm);
       payload[6] = static_cast<uint8_t>(reading.alertLevel);
-      payload[7] = reading.stormMode ? kReadingFlagStormMode : 0;
+      if (reading.stormMode) payload[7] |= kReadingFlagStormMode;
+      if (reading.levelRepeated) payload[7] |= kReadingFlagLevelRepeated;
       return true;
     }
     case PacketKind::Alert: {
@@ -87,7 +93,8 @@ bool writePayload(const Packet& packet, uint8_t* payload) {
       payload[0] = static_cast<uint8_t>(alert.alertLevel);
       put16(payload + 1, alert.levelMm);
       put16(payload + 3, static_cast<uint16_t>(alert.rateOfRiseMmPerMin));
-      payload[5] = alert.refresh ? kAlertFlagRefresh : 0;
+      if (alert.refresh) payload[5] |= kAlertFlagRefresh;
+      if (alert.levelRepeated) payload[5] |= kAlertFlagLevelRepeated;
       return true;
     }
     case PacketKind::Acknowledgement: {
@@ -107,6 +114,7 @@ bool writePayload(const Packet& packet, uint8_t* payload) {
       if (heartbeat.tamper) payload[7] |= kHeartbeatFlagTamper;
       if (heartbeat.alertRefreshLost) payload[7] |= kHeartbeatFlagAlertRefreshLost;
       if (heartbeat.hasLastLevel) payload[7] |= kHeartbeatFlagHasLastLevel;
+      if (heartbeat.lastLevelRepeated) payload[7] |= kHeartbeatFlagLastLevelRepeated;
       return true;
     }
     case PacketKind::AllClear:
@@ -129,6 +137,7 @@ bool readPayload(uint8_t kind, const uint8_t* payload, Packet& packet) {
       packet.reading.rainfallTenthsMm = get16(payload + 4);
       packet.reading.alertLevel = static_cast<AlertLevel>(payload[6]);
       packet.reading.stormMode = (payload[7] & kReadingFlagStormMode) != 0;
+      packet.reading.levelRepeated = (payload[7] & kReadingFlagLevelRepeated) != 0;
       break;
     case PacketKind::Alert:
       if (!isAlertLevel(payload[0])) return false;
@@ -136,6 +145,7 @@ bool readPayload(uint8_t kind, const uint8_t* payload, Packet& packet) {
       packet.alert.levelMm = get16(payload + 1);
       packet.alert.rateOfRiseMmPerMin = static_cast<int16_t>(get16(payload + 3));
       packet.alert.refresh = (payload[5] & kAlertFlagRefresh) != 0;
+      packet.alert.levelRepeated = (payload[5] & kAlertFlagLevelRepeated) != 0;
       break;
     case PacketKind::Acknowledgement:
       if (!isAlertLevel(payload[6])) return false;
@@ -151,6 +161,8 @@ bool readPayload(uint8_t kind, const uint8_t* payload, Packet& packet) {
       packet.heartbeat.tamper = (payload[7] & kHeartbeatFlagTamper) != 0;
       packet.heartbeat.alertRefreshLost = (payload[7] & kHeartbeatFlagAlertRefreshLost) != 0;
       packet.heartbeat.hasLastLevel = (payload[7] & kHeartbeatFlagHasLastLevel) != 0;
+      packet.heartbeat.lastLevelRepeated =
+          (payload[7] & kHeartbeatFlagLastLevelRepeated) != 0;
       break;
     case PacketKind::AllClear:
       packet.allClear.wadiNode = get16(payload);

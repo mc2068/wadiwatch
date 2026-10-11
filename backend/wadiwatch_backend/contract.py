@@ -92,7 +92,7 @@ KINDS = {
             "level_cm": _level_cm,
             "rise_cm_min": _rise_cm_min,
         },
-        # The gateway sends all three with every reading. They are optional so
+        # The gateway sends all four with every reading. They are optional so
         # that messages written before they existed stay valid.
         optional={
             "rain_mm": _number(0, MAX_RAIN_MM),
@@ -100,17 +100,21 @@ KINDS = {
             # What the node held when it measured. Only an alert message
             # changes the alert level the backend shows.
             "alert_level": _one_of(ALERT_LEVELS),
+            # The node could not measure: level_cm repeats an earlier level.
+            "level_repeated": _boolean,
         },
     ),
     "alert": Kind(
         senders=(WADI_NODE,),
         required={"alert_level": _one_of(ALERT_LEVELS)},
-        # The measurement behind the alert, and whether the alert repeats a level
-        # the node already announced. The gateway sends all three.
+        # The measurement behind the alert, whether the alert repeats a level
+        # the node already announced, and whether level_cm repeats an earlier
+        # level because the node could not measure. The gateway sends all four.
         optional={
             "level_cm": _level_cm,
             "rise_cm_min": _rise_cm_min,
             "refresh": _boolean,
+            "level_repeated": _boolean,
         },
     ),
     "acknowledgement": Kind(
@@ -131,6 +135,7 @@ KINDS = {
         },
         optional={
             "level_cm": _level_cm,
+            "level_repeated": _boolean,
             "discards": _integer(0, MAX_UINT32),
             "refresh_lost": _boolean,
         },

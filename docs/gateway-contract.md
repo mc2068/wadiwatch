@@ -73,11 +73,12 @@ Fields are required unless marked optional.
 | `rain_mm` | number, 0 to 10000, optional | Rain over the node's rainfall window (30 minutes on the prototype site), in millimetres. |
 | `storm_mode` | boolean, optional | The node is in storm mode (`true`) or dry mode (`false`). |
 | `alert_level` | string, optional | The alert level the node held when it measured: `none`, `watch`, `warning` or `evacuate`. For display beside the reading only: it never changes the alert level the backend shows. |
+| `level_repeated` | boolean, optional | `true` when the node's latest measurement gave no usable level, so that `level_cm` repeats the last level it did measure (0 if it has measured none) and says nothing about the wadi now. `false` for a level just measured. See "Repeated levels" below. |
 
-The gateway sends the three optional fields with every reading. They are optional so that messages written before they existed stay valid.
+The gateway sends the four optional fields with every reading. They are optional so that messages written before they existed stay valid.
 
 ```json
-{"v":1,"kind":"reading","node":257,"counter":1041,"ts":1791590400,"level_cm":84.5,"rise_cm_min":3.2,"rain_mm":12.4,"storm_mode":true,"alert_level":"watch"}
+{"v":1,"kind":"reading","node":257,"counter":1041,"ts":1791590400,"level_cm":84.5,"rise_cm_min":3.2,"rain_mm":12.4,"storm_mode":true,"alert_level":"watch","level_repeated":false}
 ```
 
 ### `alert`: a wadi node states its alert level
@@ -91,10 +92,12 @@ Sent by a wadi node. Each transmission the gateway accepts is forwarded, includi
 | `rise_cm_min` | number, -1000 to 1000, optional | The rate of rise behind the alert, in centimetres per minute. |
 | `refresh` | boolean, optional | `false` for the alert that raises the node's alert level, `true` for an alert refresh: the alert a node at Warning or above sends again every minute to repeat the level it already announced. The node says which it is; the gateway needs the difference after an all clear (see "Commands"). |
 
-The gateway sends the three optional fields with every alert.
+| `level_repeated` | boolean, optional | As in a `reading`: `true` when `level_cm` repeats an earlier level because the node could not measure. |
+
+The gateway sends the four optional fields with every alert.
 
 ```json
-{"v":1,"kind":"alert","node":257,"counter":1042,"ts":1791590460,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1,"refresh":false}
+{"v":1,"kind":"alert","node":257,"counter":1042,"ts":1791590460,"alert_level":"warning","level_cm":104.0,"rise_cm_min":5.1,"refresh":false,"level_repeated":false}
 ```
 
 ### `acknowledgement`: a siren node confirms an alert
@@ -122,14 +125,21 @@ Sent by a wadi node or a siren node.
 | `low_battery` | boolean | The node's battery is below its low-battery threshold. The heartbeat packet carries the voltage only: the gateway compares it with the threshold its site configuration gives for that node (`GatewayConfig::batteries`), and reports `false` for a node with no threshold there. |
 | `tamper` | boolean | The node's tamper switch is open. |
 | `level_cm` | number, optional | Wadi node: the last level measured. Left out until the node has measured one, and for a siren node. |
+| `level_repeated` | boolean, optional | Wadi node, as in a `reading`: `true` when the node's latest measurement gave no level and `level_cm` is from an earlier one. The gateway sends it whenever it sends `level_cm`. |
 | `discards` | integer, optional | Wadi node: sensor pings discarded since its previous heartbeat, because they were physically impossible or gave no echo. Not a running total. It stops counting at 255. |
 | `refresh_lost` | boolean, optional | Siren node: it fell silent because alert refreshes stopped arriving. |
 
 The heartbeat packet has the same layout for every node, and the gateway does not sort nodes by role, so it sends `discards` and `refresh_lost` in every heartbeat: `0` and `false` from a node they do not apply to.
 
 ```json
-{"v":1,"kind":"heartbeat","node":257,"counter":1043,"ts":1791590500,"battery_mv":3920,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":84.5,"discards":2,"refresh_lost":false}
+{"v":1,"kind":"heartbeat","node":257,"counter":1043,"ts":1791590500,"battery_mv":3920,"rssi_dbm":-97,"low_battery":false,"tamper":false,"level_cm":84.5,"level_repeated":false,"discards":2,"refresh_lost":false}
 ```
+
+### Repeated levels
+
+A wadi node measures with several pings of its level sensor. When too few of them are usable (no echo, a fouled or failed sensor) the measurement gives no level, and the node keeps the last level it did measure. It goes on sending that level in every alert refresh and heartbeat, and in the reading it sends on hearing an all clear, because the packet layouts have no way to leave a level out. `level_repeated` is how it says so: the packet carries the flag, and the gateway forwards it.
+
+A repeated level proves that the node is alive and nothing about the water. The backend still stores and shows it, but does not count it as evidence for the all clear: an all clear is refused while the latest level of a wadi node is a repeated one, and the time a node could not measure does not count towards the 30 minutes below the Watch threshold. A message without the field is taken as measured.
 
 ### `all_clear`: the gateway transmitted an all clear
 
@@ -165,6 +175,7 @@ The radio packets (`firmware/lib/wadiwatch/src/wadiwatch/packet.h`) count in oth
 | `signalStrengthDbm` | dBm | `rssi_dbm` | dBm |
 | `alertSender`, `alertCounter` | | `wadi_node`, `alert_counter` | |
 | `refresh` (alert) | | `refresh` | |
+| `levelRepeated`, `lastLevelRepeated` | | `level_repeated` | |
 | `wadiNode`, `command` (all clear) | | `wadi_node`, `command` | |
 | `discardedReadings`, `alertRefreshLost` | | `discards`, `refresh_lost` | |
 | `hasLastLevel` | | whether a heartbeat has `level_cm` | |

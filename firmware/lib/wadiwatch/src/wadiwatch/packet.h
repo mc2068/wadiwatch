@@ -34,6 +34,10 @@ struct ReadingPayload {
   uint16_t rainfallTenthsMm;
   AlertLevel alertLevel;
   bool stormMode;
+  // The node's latest measurement gave no usable level: levelMm repeats the last
+  // level it did measure (zero if it has measured none) and says nothing about the
+  // wadi now.
+  bool levelRepeated;
 };
 
 // A wadi node's alert level, with the measurement behind it.
@@ -46,6 +50,9 @@ struct AlertPayload {
   // it already announced. The gateway needs the difference after an all clear: a
   // refresh comes from a node that has not heard it, a raise is a new event.
   bool refresh;
+  // As in a reading: levelMm is not from the node's latest measurement, which gave
+  // no usable level.
+  bool levelRepeated;
 };
 
 // A siren node's answer to an alert it accepted: which alert, and the level it is acting on.
@@ -69,6 +76,9 @@ struct HeartbeatPayload {
   bool hasLastLevel;
   // Siren nodes only: fell silent because no alert refresh was heard.
   bool alertRefreshLost;
+  // Wadi nodes only, as in a reading: lastLevelMm is not from the node's latest
+  // measurement, which gave no usable level.
+  bool lastLevelRepeated;
 };
 
 // The end of the event at one wadi node, confirmed by an authorised officer.

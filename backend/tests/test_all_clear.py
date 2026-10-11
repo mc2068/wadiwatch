@@ -411,6 +411,123 @@ def test_everyone_can_see_whether_an_all_clear_would_be_accepted_and_why_not(
     assert (allowed["allowed"], allowed["reason"], allowed["refusal"]) == (True, None, None)
 
 
+# A level a wadi node could not measure again is not evidence
+
+
+def cannot_measure(harness, clock, blind, others, seconds):
+    """For `seconds` the level sensor of the wadi node `blind`, which is at Warning,
+    gives no usable reading: its alert refresh repeats the last level it measured,
+    and says so. The wadi nodes in `others` go on reporting the levels given. One
+    report each a minute, the last of them now."""
+    for _ in range(seconds // MINUTE):
+        clock.advance(MINUTE)
+        harness.ingest(
+            "alert",
+            blind.id,
+            alert_level="warning",
+            level_cm=LOW_CM,
+            rise_cm_min=0.0,
+            refresh=True,
+            level_repeated=True,
+        )
+        for node, level_cm in others.items():
+            harness.ingest("reading", node.id, level_cm=level_cm, rise_cm_min=0.0)
+
+
+def test_an_all_clear_is_refused_when_a_wadi_node_only_repeats_a_level_it_measured_earlier(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    flood(harness, clock, upstream, downstream)
+    # The upstream node measures one level below its Watch threshold. Then its sensor
+    # fails, and for longer than the quiet period every alert refresh repeats that level.
+    fall(harness, clock, {upstream: LOW_CM, downstream: LOW_CM}, quiet_for=0)
+    measured_at = int(clock())
+    cannot_measure(harness, clock, upstream, {downstream: LOW_CM}, site.all_clear_quiet_s + MINUTE)
+
+    response = signed_in.issue_all_clear(wadi.id)
+
+    assert response.status_code == 409
+    assert response.json()["reason"] == "wadi_nodes"
+    assert refusal_of(response, upstream) == "not_measuring"
+    assert refusal_of(response, downstream) is None
+    judged = next(node for node in response.json()["nodes"] if node["id"] == upstream.id)
+    assert judged["measured_ts"] == measured_at
+    assert judged["below_since"] is None
+    # The officer reads which wadi node it is and for how long it has not measured.
+    assert upstream.name in response.json()["error"]
+    assert "31 min" in response.json()["error"]
+    assert harness.gateway.commands == []
+
+
+def test_the_time_a_wadi_node_could_not_measure_does_not_count_towards_the_quiet_period(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    flood(harness, clock, upstream, downstream)
+    fall(harness, clock, {upstream: LOW_CM, downstream: LOW_CM}, quiet_for=10 * MINUTE)
+    # Nobody knows where the water stood at the upstream node in these five minutes.
+    cannot_measure(harness, clock, upstream, {downstream: LOW_CM}, 5 * MINUTE)
+    # Then the node measures again, and the level is below the threshold.
+    stay(harness, clock, {upstream: LOW_CM, downstream: LOW_CM}, MINUTE)
+    measuring_again_at = int(clock())
+    stay(harness, clock, {upstream: LOW_CM, downstream: LOW_CM}, site.all_clear_quiet_s - MINUTE)
+
+    too_early = signed_in.issue_all_clear(wadi.id)
+    stay(harness, clock, {upstream: LOW_CM, downstream: LOW_CM}, MINUTE)
+    in_time = signed_in.issue_all_clear(wadi.id)
+
+    # The quiet period counts from the first level measured after the gap.
+    assert too_early.status_code == 409
+    assert refusal_of(too_early, upstream) == "below_watch_too_recently"
+    judged = next(node for node in too_early.json()["nodes"] if node["id"] == upstream.id)
+    assert judged["below_since"] == measuring_again_at
+    assert in_time.status_code == 200
+
+
+def test_an_all_clear_is_refused_when_a_heartbeat_repeats_a_level_the_wadi_node_can_no_longer_measure(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    flood_that_has_passed(harness, clock, site, upstream, downstream)
+    assert wadi_verdict(signed_in, wadi)["allowed"] is True
+    # The downstream node is in dry mode and reports its level in its heartbeat only.
+    # Its sensor has stopped giving a reading since.
+    harness.ingest(
+        "heartbeat",
+        downstream.id,
+        battery_mv=3900,
+        rssi_dbm=-90,
+        low_battery=False,
+        tamper=False,
+        level_cm=LOW_CM,
+        level_repeated=True,
+    )
+
+    response = signed_in.issue_all_clear(wadi.id)
+
+    assert response.status_code == 409
+    assert refusal_of(response, downstream) == "not_measuring"
+    assert refusal_of(response, upstream) is None
+    assert downstream.name in response.json()["error"]
+
+
+def test_a_wadi_node_that_reports_a_level_without_ever_having_measured_one_blocks_the_all_clear(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    harness.ingest("alert", upstream.id, alert_level="watch")
+    fall(harness, clock, {upstream: LOW_CM}, site.all_clear_quiet_s)
+    # Rain alone raised Watch at the downstream node, whose sensor has never given a level.
+    harness.ingest(
+        "alert", downstream.id, alert_level="watch", level_cm=0.0, rise_cm_min=0.0,
+        refresh=False, level_repeated=True,
+    )
+
+    response = signed_in.issue_all_clear(wadi.id)
+
+    assert response.status_code == 409
+    assert refusal_of(response, downstream) == "not_measuring"
+    judged = next(node for node in response.json()["nodes"] if node["id"] == downstream.id)
+    assert judged["measured_ts"] is None
+
+
 # Only a signed-in officer
 
 

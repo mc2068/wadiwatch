@@ -99,6 +99,16 @@ static void test_reading_round_trips() {
   TEST_ASSERT_EQUAL_UINT16(105, received.reading.rainfallTenthsMm);
   TEST_ASSERT_TRUE(received.reading.alertLevel == AlertLevel::Watch);
   TEST_ASSERT_TRUE(received.reading.stormMode);
+  TEST_ASSERT_FALSE(received.reading.levelRepeated);
+
+  // A level the node could not measure again travels marked as repeated, and the
+  // two flags travel separately.
+  sent.reading.stormMode = false;
+  sent.reading.levelRepeated = true;
+  const Packet repeated = sendAcross(link, sent);
+  TEST_ASSERT_FALSE(repeated.reading.stormMode);
+  TEST_ASSERT_TRUE(repeated.reading.levelRepeated);
+  TEST_ASSERT_EQUAL_UINT16(1234, repeated.reading.levelMm);
 }
 
 static void test_alert_round_trips() {
@@ -121,6 +131,15 @@ static void test_alert_round_trips() {
   const Packet refresh = sendAcross(link, sent);
   TEST_ASSERT_TRUE(refresh.alert.refresh);
   TEST_ASSERT_TRUE(refresh.alert.alertLevel == AlertLevel::Evacuate);
+  TEST_ASSERT_FALSE(refresh.alert.levelRepeated);
+
+  // And one sent while the node cannot measure says that its level is repeated.
+  sent.alert.refresh = false;
+  sent.alert.levelRepeated = true;
+  const Packet repeated = sendAcross(link, sent);
+  TEST_ASSERT_FALSE(repeated.alert.refresh);
+  TEST_ASSERT_TRUE(repeated.alert.levelRepeated);
+  TEST_ASSERT_EQUAL_UINT16(2250, repeated.alert.levelMm);
 }
 
 static void test_acknowledgement_round_trips() {
@@ -173,6 +192,14 @@ static void test_heartbeat_round_trips() {
   received = sendAcross(link, sent);
   TEST_ASSERT_FALSE(received.heartbeat.tamper);
   TEST_ASSERT_TRUE(received.heartbeat.hasLastLevel);
+  TEST_ASSERT_FALSE(received.heartbeat.alertRefreshLost);
+  TEST_ASSERT_FALSE(received.heartbeat.lastLevelRepeated);
+
+  sent.heartbeat.lastLevelRepeated = true;
+  received = sendAcross(link, sent);
+  TEST_ASSERT_TRUE(received.heartbeat.hasLastLevel);
+  TEST_ASSERT_TRUE(received.heartbeat.lastLevelRepeated);
+  TEST_ASSERT_FALSE(received.heartbeat.tamper);
   TEST_ASSERT_FALSE(received.heartbeat.alertRefreshLost);
 }
 

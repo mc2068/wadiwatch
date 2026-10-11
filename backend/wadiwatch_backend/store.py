@@ -165,10 +165,13 @@ class Reader:
     # The all clear.
 
     def level_reports(self, node):
-        """Every level a wadi node reported, as (gateway time, level in cm), newest first.
+        """Every level a wadi node reported, newest first, as (gateway time, level
+        in cm, measured).
 
-        A level comes in a reading, behind an alert and in a heartbeat. Read
-        only as far back as needed: this walks the node's whole history.
+        A level comes in a reading, behind an alert and in a heartbeat. `measured`
+        is False for a level the node only repeated because its latest measurement
+        gave none (`level_repeated`). Read only as far back as needed: this walks
+        the node's whole history.
         """
         marks = ", ".join("?" for _ in LEVEL_KINDS)
         rows = self._connection.execute(
@@ -177,9 +180,9 @@ class Reader:
             (node, *LEVEL_KINDS),
         )
         for ts, body in rows:
-            level_cm = json.loads(body).get("level_cm")
-            if level_cm is not None:
-                yield ts, level_cm
+            message = json.loads(body)
+            if message.get("level_cm") is not None:
+                yield ts, message["level_cm"], not message.get("level_repeated", False)
 
     def commands(self):
         """Every all clear command that was sent to the gateway, oldest first."""

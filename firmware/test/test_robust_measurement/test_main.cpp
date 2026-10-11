@@ -642,6 +642,72 @@ static void test_a_measurement_that_gives_no_level_sends_no_reading() {
   TEST_ASSERT_EQUAL_UINT(readingsBefore, readingsOnAir(site).size());
 }
 
+// --- A level the node could not measure again ---
+
+// A level between the Warning and the Evacuate threshold.
+static float warningLevelCm(const TestSite& site) {
+  return (thresholdCm(site, AlertLevel::Warning) + thresholdCm(site, AlertLevel::Evacuate)) / 2.0f;
+}
+
+static void test_what_a_node_sends_carries_a_level_it_has_just_measured_as_such() {
+  TestSite site;
+  measureAt(site, warningLevelCm(site));
+  site.runMs(site.config.wadiNode.heartbeatIntervalMs + kMinuteMs);
+
+  const std::vector<Packet> alerts = site.packetsOnAir(PacketKind::Alert, site.config.wadiNode.id);
+  TEST_ASSERT_TRUE(alerts.size() > 1);
+  for (const Packet& alert : alerts) TEST_ASSERT_FALSE(alert.alert.levelRepeated);
+  TEST_ASSERT_FALSE(readingsOnAir(site).empty());
+  for (const Packet& reading : readingsOnAir(site)) {
+    TEST_ASSERT_FALSE(reading.reading.levelRepeated);
+  }
+  TEST_ASSERT_FALSE(wadiNodeHeartbeats(site).empty());
+  for (const Packet& heartbeat : wadiNodeHeartbeats(site)) {
+    TEST_ASSERT_TRUE(heartbeat.heartbeat.hasLastLevel);
+    TEST_ASSERT_FALSE(heartbeat.heartbeat.lastLevelRepeated);
+  }
+}
+
+static void test_an_alert_refresh_sent_while_the_sensor_gives_no_level_says_that_its_level_is_repeated() {
+  TestSite site;
+  const WadiNodeConfig& config = site.config.wadiNode;
+  measureAt(site, warningLevelCm(site));
+  site.runMs(2ull * config.alertRefreshIntervalMs);
+  const Packet measured = site.packetsOnAir(PacketKind::Alert, config.id).back();
+  TEST_ASSERT_FALSE(measured.alert.levelRepeated);
+
+  // The sensor stops giving an echo. The node keeps the level it last measured and
+  // goes on sending its alert refresh.
+  site.levelSensor.setEchoing(false);
+  site.runMs(3ull * config.alertRefreshIntervalMs);
+
+  const Packet repeated = site.packetsOnAir(PacketKind::Alert, config.id).back();
+  TEST_ASSERT_TRUE(repeated.counter > measured.counter);
+  TEST_ASSERT_EQUAL_UINT16(measured.alert.levelMm, repeated.alert.levelMm);
+  TEST_ASSERT_TRUE(repeated.alert.levelRepeated);
+
+  // The sensor works again: the next alert refresh carries a level just measured.
+  site.levelSensor.setEchoing(true);
+  site.runMs(2ull * config.alertRefreshIntervalMs);
+  TEST_ASSERT_FALSE(site.packetsOnAir(PacketKind::Alert, config.id).back().alert.levelRepeated);
+}
+
+static void test_a_heartbeat_sent_while_the_sensor_gives_no_level_says_that_its_level_is_repeated() {
+  TestSite site;
+  const WadiNodeConfig& config = site.config.wadiNode;
+  measureAt(site, lowLevelCm(site));
+
+  // The sensor dies on a dry day. The hourly heartbeat still carries the last level
+  // the node measured, and says that the node is no longer measuring it.
+  site.levelSensor.setEchoing(false);
+  site.runMs(config.heartbeatIntervalMs + kMinuteMs);
+
+  const std::vector<Packet> heartbeats = wadiNodeHeartbeats(site);
+  TEST_ASSERT_EQUAL_UINT(1, heartbeats.size());
+  TEST_ASSERT_TRUE(heartbeats[0].heartbeat.hasLastLevel);
+  TEST_ASSERT_TRUE(heartbeats[0].heartbeat.lastLevelRepeated);
+}
+
 // --- Mounting height and temperature ---
 
 static void test_the_level_is_the_mounting_height_minus_the_measured_distance() {
@@ -734,6 +800,9 @@ int main(int, char**) {
   RUN_TEST(test_a_reading_follows_the_alert_its_measurement_raised_and_carries_the_alert_level);
   RUN_TEST(test_readings_stop_when_the_node_returns_to_dry_mode);
   RUN_TEST(test_a_measurement_that_gives_no_level_sends_no_reading);
+  RUN_TEST(test_what_a_node_sends_carries_a_level_it_has_just_measured_as_such);
+  RUN_TEST(test_an_alert_refresh_sent_while_the_sensor_gives_no_level_says_that_its_level_is_repeated);
+  RUN_TEST(test_a_heartbeat_sent_while_the_sensor_gives_no_level_says_that_its_level_is_repeated);
   RUN_TEST(test_the_level_is_the_mounting_height_minus_the_measured_distance);
   RUN_TEST(test_with_a_temperature_reading_the_level_is_right_in_hot_and_in_freezing_air);
   RUN_TEST(test_without_a_temperature_reading_the_level_is_left_uncorrected);
