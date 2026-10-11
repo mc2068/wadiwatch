@@ -194,6 +194,13 @@ def gateway_output():
     return read_jsonl(CONTRACT_EXAMPLES / "gateway-output.jsonl")
 
 
+def firmware_site():
+    """What the firmware site configuration says about the values the backend site
+    file has a copy of, written by the firmware tests."""
+    with open(CONTRACT_EXAMPLES / "firmware-site.json", encoding="utf-8") as site_file:
+        return json.load(site_file)
+
+
 def backend_commands():
     """The commands the backend sends down, which the firmware tests feed the gateway core."""
     return read_jsonl(CONTRACT_EXAMPLES / "backend-commands.jsonl")

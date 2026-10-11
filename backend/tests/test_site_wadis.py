@@ -3,12 +3,19 @@
 The all clear is issued for a wadi and judged against those thresholds, so a
 site file that leaves them out, or gets them wrong, is refused when it is
 loaded rather than when an officer needs the all clear.
+
+Those values, the node identifiers and the intervals are a copy of what the
+firmware site configuration says. docs/gateway-contract/firmware-site.json
+holds them as the firmware has them: the firmware tests fail unless that file
+is what the site configuration produces, and the tests here fail unless the
+backend site file agrees with it.
 """
 
 import json
 
 import pytest
 
+from conftest import firmware_site
 from wadiwatch_backend.site import DEFAULT_SITE_FILE, SiteError, load_site
 
 
@@ -37,10 +44,51 @@ def test_the_prototype_site_has_one_wadi_with_both_wadi_nodes_on_it(site):
     assert site.wadi(wadi.id + 1) is None
 
 
-def test_the_watch_thresholds_of_the_prototype_site_are_those_of_the_firmware_site_configuration(site):
-    # firmware/lib/wadiwatch/src/wadiwatch/site_config.cpp: Watch at 30 % of a
-    # bank-full depth of 200 cm, at both wadi nodes.
-    assert [node.watch_level_cm for node in site.wadi_nodes] == [60.0, 60.0]
+# The backend site file against the firmware site configuration
+
+
+def test_the_units_of_the_backend_site_file_are_those_of_the_firmware_site_configuration(site):
+    firmware = firmware_site()
+
+    assert site.gateway.id == firmware["gateway"]
+    assert sorted(node.id for node in site.siren_nodes) == sorted(firmware["siren_nodes"])
+    assert sorted(node.id for node in site.wadi_nodes) == sorted(
+        node["id"] for node in firmware["wadi_nodes"]
+    )
+
+
+def test_each_wadi_node_is_on_the_wadi_and_below_the_upstream_node_the_firmware_gives_it(site):
+    firmware = firmware_site()
+
+    assert sorted(wadi.id for wadi in site.wadis) == sorted(wadi["id"] for wadi in firmware["wadis"])
+    for wadi in firmware["wadis"]:
+        assert sorted(node.id for node in site.wadi_nodes_of(wadi["id"])) == sorted(
+            wadi["wadi_nodes"]
+        )
+    assert {node.id: (node.wadi, node.upstream) for node in site.wadi_nodes} == {
+        node["id"]: (node["wadi"], node["upstream"]) for node in firmware["wadi_nodes"]
+    }
+
+
+def test_the_watch_thresholds_are_those_of_the_firmware_site_configuration(site):
+    firmware = firmware_site()
+
+    assert {node.id: node.watch_level_cm for node in site.wadi_nodes} == {
+        node["id"]: node["watch_level_cm"] for node in firmware["wadi_nodes"]
+    }
+
+
+@pytest.mark.parametrize(
+    "interval",
+    [
+        "heartbeat_interval_s",
+        "dry_mode_interval_s",
+        "alert_refresh_interval_s",
+        "all_clear_command_valid_s",
+    ],
+)
+def test_the_intervals_are_those_of_the_firmware_site_configuration(site, interval):
+    assert getattr(site, interval) == firmware_site()[interval]
 
 
 @pytest.mark.parametrize(

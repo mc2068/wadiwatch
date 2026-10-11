@@ -2,8 +2,11 @@
 which wadi each wadi node is mounted over, how often the site is expected to be heard
 from, and what the all clear is judged against.
 
-Node identifiers, wadi identifiers, intervals and the Watch thresholds must match the
-firmware site configuration. Keys are not kept here.
+Node identifiers, wadi identifiers, intervals and the Watch thresholds are copies of
+what the firmware site configuration says, which is their source. The copy is held to
+it by a test: docs/gateway-contract/firmware-site.json is written from the firmware
+site configuration by the firmware tests, and tests/test_site_wadis.py fails if the
+default site file disagrees with it. Keys are not kept here.
 """
 
 import json

@@ -13,10 +13,13 @@ Where each side is written down:
 - Up, examples the backend must reject, with the reason: `docs/gateway-contract/invalid.jsonl`.
 - Down, what the backend produces: `backend/wadiwatch_backend/downlink.py` and `docs/gateway-contract/backend-commands.jsonl`.
 - Down, what the gateway reads: `firmware/lib/wadiwatch/src/wadiwatch/downlink_command.cpp`.
+- The site both sides speak of, as the firmware site configuration has it: `docs/gateway-contract/firmware-site.json`.
 
 `gateway-output.jsonl` and `backend-commands.jsonl` are the shared contract check. The second is signed with the published test command key, so it also holds the two sides to the same test key and the same way of computing the authentication code. The first holds the messages the gateway core hands to its uplink for a fixed scenario covering every message kind and every node the gateway hears: one flood at both wadi nodes of the prototype site, with the refresh of an alert, the Evacuate the downstream wadi node raises on hearing the upstream one, and the all clear, which the gateway relays on the command of the second file. The firmware tests (`firmware/test/test_gateway_contract`) feed the gateway core that command, produce the messages again and fail if the first file differs by a byte or the core refuses a line of the second. The backend tests ingest the first file and fail if the backend refuses a line, and fail if the backend does not produce the lines of the second byte for byte. So the gateway and the backend cannot drift apart in either direction without a test failing on one side, although the two suites never run together.
 
-Change this document, `contract.py`, `downlink.py`, the gateway's translation and reader, and the example files together. To rewrite `gateway-output.jsonl` after an intended change, run from `firmware/`:
+`firmware-site.json` is the same kind of check for the site itself. The firmware site configuration (`site_config.cpp`) is the one source of the node identifiers, of which wadi each wadi node is on and which node is upstream of it, of the Watch thresholds and of the intervals; the backend site file holds a copy, because the backend needs them to accept messages (rule 7) and to judge staleness and the all clear. The firmware tests write the file from the site configuration and fail if the committed one differs; the backend tests fail if `backend/site/prototype.json` disagrees with it.
+
+Change this document, `contract.py`, `downlink.py`, the gateway's translation and reader, and the example files together. To rewrite `gateway-output.jsonl` and `firmware-site.json` after an intended change, run from `firmware/`:
 
 ```bash
 WADIWATCH_UPDATE_CONTRACT=1 pio test -e native -f test_gateway_contract
@@ -46,7 +49,7 @@ The backend also accepts the same payload over HTTP, `POST /api/ingest`, with on
 4. **Gateway time.** `ts` is the time the gateway received (or, for an all clear, transmitted) the packet, taken from the gateway's own clock. It is never the time of forwarding: a message held during an uplink outage keeps its original `ts`. It is not the time of the measurement either: a wadi node holds back the reading whose measurement raised an alert until the alert has had all its transmissions, so that reading reaches the gateway some seconds late. What happens while the gateway does not know the time is under "Held messages" below.
 5. **In order.** Send messages in the order the packets were received, including after an outage or a restart of the gateway. The backend treats the last message to arrive as the latest state.
 6. **Safe to repeat.** A message whose `node`, `counter` and `ts` match one already stored is ignored and reported as a duplicate, not as an error. When unsure whether a message arrived, send it again unchanged.
-7. **Known nodes only.** `node` and `wadi_node` must be identifiers from the backend site file (`backend/site/prototype.json`), which must list the same identifiers as the firmware site configuration.
+7. **Known nodes only.** `node` and `wadi_node` must be identifiers from the backend site file (`backend/site/prototype.json`), which must list the same identifiers as the firmware site configuration (`firmware-site.json` is the check).
 
 Field order and white space do not matter to the backend. The examples use the order of the tables below with no white space; producing exactly that makes byte-for-byte comparison in firmware tests possible.
 

@@ -38,7 +38,9 @@ static_assert(sizeof(kSiteKey) == kSiteKeySize, "the site key must be exactly kS
 const NodeId kWadiNodeId = 0x0101;
 const NodeId kDownstreamWadiNodeId = 0x0102;
 const NodeId kSirenNodeId = 0x0201;
-// The backend knows the gateway by this identifier too (backend/site/prototype.json).
+// The backend site file (backend/site/prototype.json) has a copy of these identifiers,
+// of the wadi table, of the Watch thresholds and of some intervals. A test holds it to
+// what is set here: see test_gateway_contract and docs/gateway-contract/firmware-site.json.
 const NodeId kGatewayNodeId = 0x0301;
 // The one wadi of the bench prototype.
 const WadiId kWadi = 1;

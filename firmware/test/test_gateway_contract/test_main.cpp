@@ -13,12 +13,20 @@
 // produce those lines byte for byte. So the two sides also agree on the test key and
 // on how a command's authentication code is computed.
 //
-// After an intended change to the messages, rewrite the file and then run the backend
-// tests:
+// A third file there, firmware-site.json, holds what the firmware site configuration
+// says about the things the backend site file (backend/site/prototype.json) has a copy
+// of: the node identifiers, which wadi each wadi node is on and what is upstream of it,
+// the Watch thresholds and the intervals. This test fails if the file is not what the
+// site configuration says; the backend tests fail if the backend site file disagrees
+// with it. So the copy cannot drift from the site configuration unnoticed.
+//
+// After an intended change to the messages or to the site configuration, rewrite the
+// files and then run the backend tests:
 //
 //   WADIWATCH_UPDATE_CONTRACT=1 pio test -e native -f test_gateway_contract
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <initializer_list>
@@ -27,6 +35,7 @@
 
 #include <unity.h>
 
+#include "wadiwatch/alert_engine.h"
 #include "wadiwatch/downlink_command.h"
 #include "wadiwatch/packet.h"
 #include "wadiwatch/site_config.h"
@@ -39,6 +48,9 @@ using wadiwatch::GatewayConfig;
 using wadiwatch::NodeId;
 using wadiwatch::Packet;
 using wadiwatch::PacketKind;
+using wadiwatch::SiteConfig;
+using wadiwatch::WadiConfig;
+using wadiwatch::WadiNodeConfig;
 using wadiwatch::testing::QuietSite;
 using wadiwatch::testing::TestSite;
 
@@ -49,6 +61,7 @@ namespace {
 
 const char kOutputFile[] = "gateway-output.jsonl";
 const char kCommandsFile[] = "backend-commands.jsonl";
+const char kSiteFile[] = "firmware-site.json";
 // A file that is always in the directory of the contract examples.
 const char kLandmarkFile[] = "valid.jsonl";
 const char kDirectoryVariable[] = "WADIWATCH_CONTRACT_DIR";
@@ -262,22 +275,109 @@ void write(const std::string& path, const std::vector<std::string>& lines) {
   TEST_ASSERT_TRUE_MESSAGE(file.good(), ("cannot write " + path).c_str());
 }
 
-}  // namespace
-
-static void test_the_gateway_output_file_is_what_the_gateway_core_produces() {
-  const std::vector<std::string> produced = gatewayOutput();
-  const std::string path = contractDirectory() + "/" + kOutputFile;
+// Fails unless the committed file is, line for line, what was produced. With the
+// update variable set, the file is rewritten first.
+void assertFileHolds(const char* name, const std::vector<std::string>& produced,
+                     const char* advice) {
+  const std::string path = contractDirectory() + "/" + name;
   if (std::getenv(kUpdateVariable) != nullptr) write(path, produced);
 
   const std::vector<std::string> committed = linesOf(path);
-
-  const char* const advice =
-      "docs/gateway-contract/gateway-output.jsonl is not what the gateway produces. If the "
-      "change is intended, rerun with WADIWATCH_UPDATE_CONTRACT=1 and run the backend tests.";
   for (size_t i = 0; i < produced.size() && i < committed.size(); ++i) {
     TEST_ASSERT_EQUAL_STRING_MESSAGE(committed[i].c_str(), produced[i].c_str(), advice);
   }
   TEST_ASSERT_EQUAL_UINT_MESSAGE(committed.size(), produced.size(), advice);
+}
+
+// --- What the firmware site configuration says, for the backend site file ---
+
+const WadiNodeConfig& wadiNodeConfig(const SiteConfig& site, NodeId id) {
+  if (site.downstreamWadiNode.id == id) return site.downstreamWadiNode;
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(site.wadiNode.id, id,
+                                   "the gateway's wadi table names a node with no configuration");
+  return site.wadiNode;
+}
+
+// A duration of the site configuration in the backend's unit, whole seconds.
+std::string seconds(uint32_t milliseconds) {
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, milliseconds % 1000,
+                                   "the backend counts this interval in whole seconds");
+  return std::to_string(milliseconds / 1000);
+}
+
+std::string centimetres(float value) {
+  char text[32];
+  std::snprintf(text, sizeof(text), "%.1f", static_cast<double>(value));
+  return text;
+}
+
+std::vector<std::string> firmwareSite() {
+  const SiteConfig& site = wadiwatch::prototypeSite();
+  const GatewayConfig& gateway = site.gateway;
+
+  std::vector<std::string> wadis;
+  std::vector<std::string> wadiNodes;
+  for (size_t w = 0; w < gateway.wadiCount; ++w) {
+    const WadiConfig& wadi = gateway.wadis[w];
+    std::string onIt;
+    for (size_t n = 0; n < wadi.wadiNodeCount; ++n) {
+      const WadiNodeConfig& node = wadiNodeConfig(site, wadi.wadiNodes[n]);
+      // The backend site file has one value of each interval for the whole site.
+      TEST_ASSERT_EQUAL_UINT32(site.sirenNode.heartbeatIntervalMs, node.heartbeatIntervalMs);
+      TEST_ASSERT_EQUAL_UINT32(site.wadiNode.mode.dryMeasureIntervalMs,
+                               node.mode.dryMeasureIntervalMs);
+      TEST_ASSERT_EQUAL_UINT32(site.wadiNode.alertRefreshIntervalMs, node.alertRefreshIntervalMs);
+
+      onIt += (n == 0 ? "" : ", ") + std::to_string(node.id);
+      const std::string upstream =
+          node.upstream.node == wadiwatch::kNoNode ? "null" : std::to_string(node.upstream.node);
+      wadiNodes.push_back(
+          "{\"id\": " + std::to_string(node.id) + ", \"wadi\": " + std::to_string(wadi.id) +
+          ", \"upstream\": " + upstream + ", \"watch_level_cm\": " +
+          centimetres(levelThresholdCm(node.alertThresholds, AlertLevel::Watch)) + "}");
+    }
+    wadis.push_back("{\"id\": " + std::to_string(wadi.id) + ", \"wadi_nodes\": [" + onIt + "]}");
+  }
+
+  std::vector<std::string> lines;
+  lines.push_back("{");
+  lines.push_back("  \"gateway\": " + std::to_string(gateway.id) + ",");
+  lines.push_back("  \"siren_nodes\": [" + std::to_string(site.sirenNode.id) + "],");
+  lines.push_back("  \"wadis\": [");
+  for (size_t i = 0; i < wadis.size(); ++i) {
+    lines.push_back("    " + wadis[i] + (i + 1 < wadis.size() ? "," : ""));
+  }
+  lines.push_back("  ],");
+  lines.push_back("  \"wadi_nodes\": [");
+  for (size_t i = 0; i < wadiNodes.size(); ++i) {
+    lines.push_back("    " + wadiNodes[i] + (i + 1 < wadiNodes.size() ? "," : ""));
+  }
+  lines.push_back("  ],");
+  lines.push_back("  \"heartbeat_interval_s\": " + seconds(site.sirenNode.heartbeatIntervalMs) + ",");
+  lines.push_back("  \"dry_mode_interval_s\": " + seconds(site.wadiNode.mode.dryMeasureIntervalMs) +
+                  ",");
+  lines.push_back("  \"alert_refresh_interval_s\": " + seconds(site.wadiNode.alertRefreshIntervalMs) +
+                  ",");
+  lines.push_back("  \"all_clear_command_valid_s\": " + std::to_string(gateway.commandMaxAgeS));
+  lines.push_back("}");
+  return lines;
+}
+
+}  // namespace
+
+static void test_the_firmware_site_file_is_what_the_site_configuration_says() {
+  assertFileHolds(
+      kSiteFile, firmwareSite(),
+      "docs/gateway-contract/firmware-site.json is not what the firmware site configuration "
+      "says. If the change is intended, rerun with WADIWATCH_UPDATE_CONTRACT=1, change "
+      "backend/site/prototype.json to match and run the backend tests.");
+}
+
+static void test_the_gateway_output_file_is_what_the_gateway_core_produces() {
+  assertFileHolds(
+      kOutputFile, gatewayOutput(),
+      "docs/gateway-contract/gateway-output.jsonl is not what the gateway produces. If the "
+      "change is intended, rerun with WADIWATCH_UPDATE_CONTRACT=1 and run the backend tests.");
 }
 
 // The all clears of the file come out of the gateway's own radio and uplink: each
@@ -364,6 +464,7 @@ static void test_the_gateway_output_covers_every_node_the_gateway_hears() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_the_firmware_site_file_is_what_the_site_configuration_says);
   RUN_TEST(test_the_gateway_output_file_is_what_the_gateway_core_produces);
   RUN_TEST(test_the_all_clears_in_the_gateway_output_are_the_gateway_s_own_for_every_wadi_node);
   RUN_TEST(test_the_gateway_reads_every_command_of_the_shared_examples);
