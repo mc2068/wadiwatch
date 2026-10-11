@@ -32,6 +32,6 @@ const char* allClearName(Language language);
 
 // Writes the closing SMS: it tells a recipient that the event at the wadi called
 // `wadiName` is over. Same rules as renderAlertSms for the buffer and the length.
-size_t renderAllClearSms(Language language, const char* wadiName, char* buffer, size_t capacity);
+size_t renderClosingSms(Language language, const char* wadiName, char* buffer, size_t capacity);
 
 }  // namespace wadiwatch

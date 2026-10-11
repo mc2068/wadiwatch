@@ -30,13 +30,13 @@ constexpr size_t kRecordSize = kCheckOffset + 2;
 static_assert(kRecordSize <= kStorageSlotSize, "a stored message must fit one slot");
 
 constexpr uint8_t kFlagDatedSinceStart = 0x01;
-constexpr uint8_t kFlagAlertRefresh = 0x02;
+constexpr uint8_t kFlagNothingNew = 0x02;
 
 // In the order in which messages give way when the store is full.
 constexpr uint8_t kReading = 0;
 constexpr uint8_t kHeartbeat = 1;
 constexpr uint8_t kAcknowledgementOrTest = 2;
-constexpr uint8_t kAlertRefresh = 3;
+constexpr uint8_t kAlertNothingNew = 3;
 constexpr uint8_t kAlertLevelChange = 4;
 
 void put16(uint8_t* at, uint16_t value) {
@@ -66,7 +66,7 @@ uint16_t checkOf(const uint8_t* data, size_t length) {
   return static_cast<uint16_t>((high << 8) | low);
 }
 
-uint8_t importanceOf(PacketKind kind, bool isAlertRefresh) {
+uint8_t importanceOf(PacketKind kind, bool nothingNew) {
   switch (kind) {
     case PacketKind::Reading:
       return kReading;
@@ -76,7 +76,7 @@ uint8_t importanceOf(PacketKind kind, bool isAlertRefresh) {
     case PacketKind::Test:
       return kAcknowledgementOrTest;
     case PacketKind::Alert:
-      return isAlertRefresh ? kAlertRefresh : kAlertLevelChange;
+      return nothingNew ? kAlertNothingNew : kAlertLevelChange;
     case PacketKind::AllClear:
       return kAlertLevelChange;
   }
@@ -135,12 +135,12 @@ void MessageStore::add(const StoredMessage& message) {
 
   Entry entry = Entry();
   entry.sequence = nextSequence_;
-  bool isRefresh = false;
+  bool nothingNew = false;
   if (alertLevelStated(message.packet, entry.wadiNode, entry.alertLevel)) {
-    isRefresh = message.packet.kind == PacketKind::Alert &&
+    nothingNew = message.packet.kind == PacketKind::Alert &&
                 tellsNothingNew(entry.wadiNode, entry.alertLevel);
   }
-  entry.importance = importanceOf(message.packet.kind, isRefresh);
+  entry.importance = importanceOf(message.packet.kind, nothingNew);
 
   size_t slot = 0;
   if (!findFree(slot)) {
@@ -155,7 +155,7 @@ void MessageStore::add(const StoredMessage& message) {
   if (!writePacketContent(message.packet, data + kPacketOffset)) return;
   data[kFormatOffset] = kRecordFormat;
   if (message.datedSinceStart) data[kFlagsOffset] |= kFlagDatedSinceStart;
-  if (isRefresh) data[kFlagsOffset] |= kFlagAlertRefresh;
+  if (nothingNew) data[kFlagsOffset] |= kFlagNothingNew;
   put32(data + kSequenceOffset, entry.sequence);
   put32(data + kReceivedAtOffset, message.receivedAt);
   put16(data + kCheckOffset, checkOf(data, kCheckOffset));
@@ -195,7 +195,7 @@ void MessageStore::removeOldest() {
   storage_.write(slot, blank);
   // The backend now knows what this message said of a wadi node's alert level.
   const Entry& entry = entries_[slot];
-  if (entry.importance >= kAlertRefresh) noteTold(entry.wadiNode, entry.alertLevel);
+  if (entry.importance >= kAlertNothingNew) noteTold(entry.wadiNode, entry.alertLevel);
   entries_[slot].sequence = 0;
 }
 
@@ -215,7 +215,7 @@ bool MessageStore::parse(const uint8_t* data, StoredMessage& message, Entry& ent
   entry = Entry();
   entry.sequence = sequence;
   alertLevelStated(message.packet, entry.wadiNode, entry.alertLevel);
-  entry.importance = importanceOf(message.packet.kind, (flags & kFlagAlertRefresh) != 0);
+  entry.importance = importanceOf(message.packet.kind, (flags & kFlagNothingNew) != 0);
   return true;
 }
 
@@ -228,7 +228,7 @@ bool MessageStore::tellsNothingNew(NodeId wadiNode, AlertLevel alertLevel) const
   const Entry* latest = nullptr;
   for (size_t slot = 0; slot < slotCount_; ++slot) {
     const Entry& entry = entries_[slot];
-    if (entry.sequence == 0 || entry.importance < kAlertRefresh) continue;
+    if (entry.sequence == 0 || entry.importance < kAlertNothingNew) continue;
     if (entry.wadiNode != wadiNode) continue;
     if (latest == nullptr || entry.sequence > latest->sequence) latest = &entry;
   }

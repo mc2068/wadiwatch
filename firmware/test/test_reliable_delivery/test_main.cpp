@@ -155,7 +155,7 @@ void issueAllClear(TestSite& site) {
   site.runMs(site.allClearSettleMs());
 }
 
-// The scenario's own wadi node re-sends its alert at every refresh interval for `durationMs`.
+// The scenario's own wadi node sends an alert refresh at every refresh interval for `durationMs`.
 void keepRefreshing(TestSite& site, ScriptedNode& wadiNode, AlertLevel alertLevel,
                     uint64_t durationMs) {
   for (uint64_t elapsed = 0; elapsed < durationMs; elapsed += refreshIntervalMs(site)) {
@@ -510,7 +510,7 @@ static void test_with_no_alert_refresh_for_the_configured_timeout_the_siren_fall
 static void test_an_alert_refreshed_within_the_timeout_stays_in_force() {
   TestSite site;
   const uint64_t timeoutMs = site.config.sirenNode.alertRefreshTimeoutMs;
-  // The scenario plays the wadi node, re-sending its alert the way a wadi node at
+  // The scenario plays the wadi node, sending alert refreshes the way a wadi node at
   // Warning or above does.
   site.unplugWadiNode();
   ScriptedNode wadiNode(site.config.auth, site.config.wadiNode.id);
@@ -554,7 +554,7 @@ static void test_a_refresh_heard_after_the_siren_fell_silent_sounds_it_again_and
 
 static void test_a_watch_that_is_never_refreshed_is_not_reported_as_a_lost_refresh() {
   TestSite site;
-  // A wadi node at Watch sends its alert once and does not re-send it.
+  // A wadi node at Watch sends its alert once and sends no alert refresh.
   floodTo(site, AlertLevel::Watch);
 
   site.runMs(static_cast<uint64_t>(site.config.sirenNode.alertRefreshTimeoutMs) +

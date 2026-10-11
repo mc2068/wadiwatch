@@ -184,7 +184,7 @@ const char* wadiNameIn(const WadiConfig& wadi, Language language) {
 // The closing SMS a recipient should read at the all clear for `wadi`.
 std::string closingText(const Recipient& recipient, const WadiConfig& wadi) {
   char text[wadiwatch::kMaxSmsTextLength + 1];
-  const size_t length = wadiwatch::renderAllClearSms(
+  const size_t length = wadiwatch::renderClosingSms(
       recipient.language, wadiNameIn(wadi, recipient.language), text, sizeof(text));
   return std::string(text, length);
 }
@@ -313,7 +313,7 @@ static void test_the_all_clear_for_one_wadi_leaves_the_event_at_another_wadi_alo
   // The second wadi's node goes on sending its alert, and the siren on sounding for it.
   const size_t alertsFromFirst = alertsFrom(site, first).size();
   const size_t alertsFromSecond = alertsFrom(site, second).size();
-  site.runMs(5 * second.config.alertResendIntervalMs);
+  site.runMs(5 * second.config.alertRefreshIntervalMs);
   TEST_ASSERT_EQUAL_UINT(alertsFromFirst, alertsFrom(site, first).size());
   TEST_ASSERT_TRUE(alertsFrom(site, second).size() >= alertsFromSecond + 4);
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
@@ -358,9 +358,9 @@ static void test_the_siren_is_not_sounded_again_between_the_command_and_the_wadi
     site.runMs(kStepMs);
     waitedMs += kStepMs;
   }
-  // And that is within one re-send interval of the command.
-  TEST_ASSERT_TRUE(waitedMs <= site.config.wadiNode.alertResendIntervalMs + kStepMs);
-  TEST_ASSERT_FALSE(sirenSoundsWithin(site, 10 * site.config.wadiNode.alertResendIntervalMs));
+  // And that is within one alert refresh interval of the command.
+  TEST_ASSERT_TRUE(waitedMs <= site.config.wadiNode.alertRefreshIntervalMs + kStepMs);
+  TEST_ASSERT_FALSE(sirenSoundsWithin(site, 10 * site.config.wadiNode.alertRefreshIntervalMs));
 }
 
 static void test_a_forged_all_clear_stops_neither_the_siren_nor_the_wadi_node() {
@@ -378,7 +378,7 @@ static void test_a_forged_all_clear_stops_neither_the_siren_nor_the_wadi_node() 
 
   // Each is put on the air again and again for several minutes, so that the wadi
   // node, which listens only after its own transmissions, has every chance to hear it.
-  for (uint64_t elapsed = 0; elapsed < 3 * node.config.alertResendIntervalMs; elapsed += kStepMs) {
+  for (uint64_t elapsed = 0; elapsed < 3 * node.config.alertRefreshIntervalMs; elapsed += kStepMs) {
     site.air.inject(forger.allClear(node.config.id));
     site.air.inject(outsider.allClear(node.config.id));
     site.runMs(kStepMs);
@@ -387,7 +387,7 @@ static void test_a_forged_all_clear_stops_neither_the_siren_nor_the_wadi_node() 
 
   ASSERT_SIREN_SOUND(SirenSound::Continuous, site.listenToSiren());
   const size_t alertsBefore = alertsFrom(site, node).size();
-  site.runMs(3 * node.config.alertResendIntervalMs);
+  site.runMs(3 * node.config.alertRefreshIntervalMs);
   TEST_ASSERT_TRUE(alertsFrom(site, node).size() >= alertsBefore + 2);
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, readingsFrom(site, node).back().reading.alertLevel);
 
@@ -409,7 +409,7 @@ static void test_an_all_clear_played_back_does_not_end_a_later_event() {
   floodTo(site, node, AlertLevel::Evacuate);
 
   // Someone plays the recorded all clears back, for minutes on end.
-  for (uint64_t elapsed = 0; elapsed < 3 * node.config.alertResendIntervalMs; elapsed += kStepMs) {
+  for (uint64_t elapsed = 0; elapsed < 3 * node.config.alertRefreshIntervalMs; elapsed += kStepMs) {
     for (const Frame& frame : recorded) site.air.inject(frame);
     site.runMs(kStepMs);
     TEST_ASSERT_TRUE(site.siren.isOn());
@@ -432,7 +432,7 @@ static void test_a_wadi_node_returns_to_no_alert_and_stops_sending_its_alert_aga
   // The node says at once that it holds no alert level any more.
   ASSERT_ALERT_LEVEL(AlertLevel::None, readingsFrom(site, node).back().reading.alertLevel);
   const size_t alertsAfterTheAllClear = alertsFrom(site, node).size();
-  site.runMs(10 * node.config.alertResendIntervalMs);
+  site.runMs(10 * node.config.alertRefreshIntervalMs);
   TEST_ASSERT_EQUAL_UINT(alertsAfterTheAllClear, alertsFrom(site, node).size());
   ASSERT_ALERT_LEVEL(AlertLevel::None, readingsFrom(site, node).back().reading.alertLevel);
 }
@@ -499,7 +499,7 @@ static void test_an_all_clear_for_a_wadi_covers_every_wadi_node_on_it() {
   for (const Node& node : {upstream, downstream}) {
     ASSERT_ALERT_LEVEL(AlertLevel::None, readingsFrom(site, node).back().reading.alertLevel);
     const size_t alerts = alertsFrom(site, node).size();
-    site.runMs(5 * node.config.alertResendIntervalMs);
+    site.runMs(5 * node.config.alertRefreshIntervalMs);
     TEST_ASSERT_EQUAL_UINT(alerts, alertsFrom(site, node).size());
   }
   TEST_ASSERT_FALSE(sirenSoundsWithin(site, 5 * kMinuteMs));
@@ -522,7 +522,7 @@ static void test_after_the_all_clear_a_warning_heard_from_upstream_before_it_con
 
   // A second flood reaches the downstream node only: Warning there, a dry bed upstream.
   downstream.levelSensor.setWaterLevelCm(levelWithin(downstream, AlertLevel::Warning));
-  site.runMs(5 * downstream.config.alertResendIntervalMs);
+  site.runMs(5 * downstream.config.alertRefreshIntervalMs);
 
   // The Warning the upstream node sent in the event that is over does not make it Evacuate.
   const std::vector<Packet> alerts = alertsFrom(site, downstream);
@@ -557,7 +557,7 @@ static void test_a_wadi_node_whose_water_still_calls_for_an_alert_raises_it_agai
   TEST_ASSERT_TRUE(texts[1] == closingText(official, site.config.gateway.wadis[0]));
   // And the gateway does not answer the new alert with the old all clear.
   const size_t allClears = allClearsFor(site, node).size();
-  site.runMs(5 * node.config.alertResendIntervalMs);
+  site.runMs(5 * node.config.alertRefreshIntervalMs);
   TEST_ASSERT_EQUAL_UINT(allClears, allClearsFor(site, node).size());
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
 }
@@ -568,9 +568,9 @@ static void test_a_wadi_node_marks_the_alert_it_sends_again_as_a_refresh_and_the
   TestSite site;
   const Node node = upstreamNode(site);
   floodTo(site, node, AlertLevel::Warning);
-  site.runMs(3 * node.config.alertResendIntervalMs);
+  site.runMs(3 * node.config.alertRefreshIntervalMs);
   floodTo(site, node, AlertLevel::Evacuate);
-  site.runMs(3 * node.config.alertResendIntervalMs);
+  site.runMs(3 * node.config.alertRefreshIntervalMs);
 
   const std::vector<Packet> alerts = alertsFrom(site, node);
   TEST_ASSERT_TRUE(alerts.size() >= 6);
@@ -608,7 +608,7 @@ static void test_a_wadi_node_that_restarts_into_a_flood_after_the_all_clear_is_b
 
   // From its first transmission on the siren sounds, without a break, and the
   // gateway answers with no all clear.
-  for (uint64_t elapsed = 0; elapsed < 3 * node.config.alertResendIntervalMs; elapsed += kStepMs) {
+  for (uint64_t elapsed = 0; elapsed < 3 * node.config.alertRefreshIntervalMs; elapsed += kStepMs) {
     TEST_ASSERT_TRUE(site.siren.isStrobeOn());
     site.runMs(kStepMs);
   }
@@ -662,7 +662,7 @@ static void test_a_wadi_node_that_missed_the_all_clear_is_given_it_again_and_no_
   site.air.dropNextFrom(site.gatewayRadio, site.config.gateway.allClearRepeat.transmissions);
 
   issueAllClearAndWait(site);
-  site.runMs(2 * node.config.alertResendIntervalMs);
+  site.runMs(2 * node.config.alertRefreshIntervalMs);
   letSmsGoOut(site);
 
   // The node sent its alert again, the gateway answered again, and that one arrived.
@@ -674,7 +674,7 @@ static void test_a_wadi_node_that_missed_the_all_clear_is_given_it_again_and_no_
   TEST_ASSERT_TRUE(closingSmsCount(site) > 0);
   // Nothing more follows.
   const size_t alerts = alertsFrom(site, node).size();
-  site.runMs(5 * node.config.alertResendIntervalMs);
+  site.runMs(5 * node.config.alertRefreshIntervalMs);
   TEST_ASSERT_EQUAL_UINT(alerts, alertsFrom(site, node).size());
   TEST_ASSERT_EQUAL_UINT(2, allClearsFor(site, node).size());
 }
@@ -691,7 +691,7 @@ static void test_a_wadi_node_that_never_hears_is_answered_a_limited_number_of_ti
   site.air.dropNextFrom(site.gatewayRadio, 100000);
 
   site.issueAllClear();
-  site.runMs((site.config.gateway.allClearMaxAnswers + 3ull) * node.config.alertResendIntervalMs);
+  site.runMs((site.config.gateway.allClearMaxAnswers + 3ull) * node.config.alertRefreshIntervalMs);
   letSmsGoOut(site);
 
   // The gateway did not go on answering for ever,
@@ -775,19 +775,19 @@ static void test_a_wadi_node_in_alert_listens_only_for_the_answer_window_after_e
   const Node node = upstreamNode(site);
   floodTo(site, node, AlertLevel::Evacuate);
   // Past the transmissions of the first alert.
-  site.runMs(node.config.alertResendIntervalMs / 2);
+  site.runMs(node.config.alertRefreshIntervalMs / 2);
 
   size_t framesBefore = node.radio.sent().size();
   uint64_t lastSentAtMs = 0;
   bool sent = false;
-  for (uint64_t elapsed = 0; elapsed < 5 * node.config.alertResendIntervalMs; elapsed += kStepMs) {
+  for (uint64_t elapsed = 0; elapsed < 5 * node.config.alertRefreshIntervalMs; elapsed += kStepMs) {
     site.runMs(kStepMs);
     if (node.radio.sent().size() != framesBefore) {
       framesBefore = node.radio.sent().size();
       lastSentAtMs = site.clock.nowMs();
       sent = true;
     }
-    const bool windowOpen = sent && site.clock.nowMs() - lastSentAtMs < node.config.allClearWindowMs;
+    const bool windowOpen = sent && site.clock.nowMs() - lastSentAtMs < node.config.answerWindowMs;
     TEST_ASSERT_EQUAL(windowOpen, node.radio.isListening());
   }
   TEST_ASSERT_TRUE(sent);

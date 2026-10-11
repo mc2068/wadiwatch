@@ -17,7 +17,7 @@
 // everyone who received an alert for it, and transmits a signed all clear packet
 // naming each wadi node of the wadi, which is also forwarded to the backend like
 // any packet it hears. How a wadi node that sleeps is made to hear it is described
-// at Clearance below.
+// at WadiNodeAllClear below.
 #pragma once
 
 #include <cstddef>
@@ -96,7 +96,7 @@ class Gateway {
   // An alert that raises a node's alert level is never the old alert. It always
   // starts or escalates an event, it is never answered with an all clear, and an
   // all clear still held for that node is dropped.
-  struct Clearance {
+  struct WadiNodeAllClear {
     // The alert level the node last showed, in an alert or a reading.
     AlertLevel shown = AlertLevel::None;
     // The command the all clear belongs to.
@@ -124,7 +124,7 @@ class Gateway {
   void handleCommands(uint64_t nowMs);
   void handleAllClearCommand(const AllClearCommand& command, uint64_t nowMs);
   void endEvent(size_t wadiIndex);
-  bool handleAwaitedPacket(Clearance& clearance, const Packet& packet, uint64_t nowMs);
+  bool handleAwaitedPacket(WadiNodeAllClear& allClear, const Packet& packet, uint64_t nowMs);
   void transmitOneAllClear(uint64_t nowMs);
 
   GatewayConfig config_;
@@ -153,7 +153,7 @@ class Gateway {
   uint64_t nextUplinkAttemptAtMs_ = 0;
 
   // One per wadi node of each wadi, in the order of the configuration.
-  Clearance clearances_[kMaxWadis][kMaxWadiNodesPerWadi];
+  WadiNodeAllClear allClears_[kMaxWadis][kMaxWadiNodesPerWadi];
   // The all clear packet being transmitted its several times. Until its last copy
   // has gone out the gateway sends no other packet: receivers would refuse the
   // copies still to come as older than what they last accepted.

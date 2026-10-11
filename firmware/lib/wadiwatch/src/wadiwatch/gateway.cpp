@@ -92,7 +92,7 @@ void Gateway::handleReceivedFrames(uint64_t nowMs) {
     // What a wadi node sends after an all clear it has not heard is the alert that
     // all clear ended: it gets the all clear again, and starts no event.
     if (findWadiNode(packet.sender, wadiIndex, nodeIndex) &&
-        handleAwaitedPacket(clearances_[wadiIndex][nodeIndex], packet, nowMs)) {
+        handleAwaitedPacket(allClears_[wadiIndex][nodeIndex], packet, nowMs)) {
       continue;
     }
     if (packet.kind == PacketKind::Alert) handleAlert(packet.sender, packet.alert.alertLevel);
@@ -239,13 +239,13 @@ void Gateway::handleAllClearCommand(const AllClearCommand& command, uint64_t now
   endEvent(wadiIndex);
   const WadiConfig& wadi = config_.wadis[wadiIndex];
   for (size_t n = 0; n < wadi.wadiNodeCount; ++n) {
-    Clearance& clearance = clearances_[wadiIndex][n];
-    clearance.command = command.command;
-    clearance.due = true;
-    clearance.dueAtMs = nowMs + config_.allClearHoldMs;
-    clearance.awaited = clearance.shown != AlertLevel::None && config_.allClearMaxAnswers > 0;
-    clearance.awaitedUntilMs = nowMs + config_.allClearAnswerPeriodMs;
-    clearance.answersLeft = config_.allClearMaxAnswers;
+    WadiNodeAllClear& allClear = allClears_[wadiIndex][n];
+    allClear.command = command.command;
+    allClear.due = true;
+    allClear.dueAtMs = nowMs + config_.allClearHoldMs;
+    allClear.awaited = allClear.shown != AlertLevel::None && config_.allClearMaxAnswers > 0;
+    allClear.awaitedUntilMs = nowMs + config_.allClearAnswerPeriodMs;
+    allClear.answersLeft = config_.allClearMaxAnswers;
   }
 }
 
@@ -266,9 +266,9 @@ void Gateway::endEvent(size_t wadiIndex) {
 // A packet from a wadi node, looked at for what it means for that node's all clear.
 // Returns true when the packet belongs to the event the all clear ended: the caller
 // then does not act on it as an alert.
-bool Gateway::handleAwaitedPacket(Clearance& clearance, const Packet& packet, uint64_t nowMs) {
-  if (packet.kind == PacketKind::Alert) clearance.shown = packet.alert.alertLevel;
-  if (packet.kind == PacketKind::Reading) clearance.shown = packet.reading.alertLevel;
+bool Gateway::handleAwaitedPacket(WadiNodeAllClear& allClear, const Packet& packet, uint64_t nowMs) {
+  if (packet.kind == PacketKind::Alert) allClear.shown = packet.alert.alertLevel;
+  if (packet.kind == PacketKind::Reading) allClear.shown = packet.reading.alertLevel;
 
   // An alert that raises the node's alert level is news whatever came before: the
   // node heard the all clear and the water has come back, or it restarted into a
@@ -276,32 +276,32 @@ bool Gateway::handleAwaitedPacket(Clearance& clearance, const Packet& packet, ui
   // all clear, and an all clear still held for the node is not transmitted. Only an
   // alert refresh can be the old alert.
   if (packet.kind == PacketKind::Alert && !packet.alert.refresh) {
-    clearance.awaited = false;
-    clearance.due = false;
+    allClear.awaited = false;
+    allClear.due = false;
     return false;
   }
 
-  if (clearance.awaited && nowMs >= clearance.awaitedUntilMs) clearance.awaited = false;
+  if (allClear.awaited && nowMs >= allClear.awaitedUntilMs) allClear.awaited = false;
   // An all clear is still held for the node and the node shows an alert level: one it
   // held when the command came, which a gateway that restarted had not heard of.
-  if (clearance.due && !clearance.awaited && clearance.shown != AlertLevel::None &&
+  if (allClear.due && !allClear.awaited && allClear.shown != AlertLevel::None &&
       config_.allClearMaxAnswers > 0) {
-    clearance.awaited = true;
-    clearance.awaitedUntilMs = nowMs + config_.allClearAnswerPeriodMs;
-    clearance.answersLeft = config_.allClearMaxAnswers;
+    allClear.awaited = true;
+    allClear.awaitedUntilMs = nowMs + config_.allClearAnswerPeriodMs;
+    allClear.answersLeft = config_.allClearMaxAnswers;
   }
 
-  if (!clearance.awaited) {
+  if (!allClear.awaited) {
     // The node has just transmitted, so it is listening: the moment for an all
     // clear held for it.
-    if (clearance.due) clearance.dueAtMs = nowMs;
+    if (allClear.due) allClear.dueAtMs = nowMs;
     return false;
   }
 
   if (packet.kind == PacketKind::Reading && packet.reading.alertLevel == AlertLevel::None) {
     // The node holds no alert level any more: it has heard.
-    clearance.awaited = false;
-    if (clearance.due) clearance.dueAtMs = nowMs;
+    allClear.awaited = false;
+    if (allClear.due) allClear.dueAtMs = nowMs;
     return false;
   }
 
@@ -312,10 +312,10 @@ bool Gateway::handleAwaitedPacket(Clearance& clearance, const Packet& packet, ui
       packet.kind == PacketKind::Alert || packet.kind == PacketKind::Heartbeat ||
       (packet.kind == PacketKind::Reading && packet.reading.alertLevel == AlertLevel::Watch);
   if (asks) {
-    clearance.due = true;
-    clearance.dueAtMs = nowMs;
+    allClear.due = true;
+    allClear.dueAtMs = nowMs;
     // After the last answer the node's next alert is a new event.
-    if (--clearance.answersLeft == 0) clearance.awaited = false;
+    if (--allClear.answersLeft == 0) allClear.awaited = false;
   }
   return true;
 }
@@ -332,15 +332,15 @@ void Gateway::transmitOneAllClear(uint64_t nowMs) {
   // Nothing else leaves the gateway between the first copy of a packet and the last.
   if (allClearRepeater_.pending()) return;
 
-  Clearance* next = nullptr;
+  WadiNodeAllClear* next = nullptr;
   NodeId wadiNode = kNoNode;
   for (size_t w = 0; w < config_.wadiCount; ++w) {
     const WadiConfig& wadi = config_.wadis[w];
     for (size_t n = 0; n < wadi.wadiNodeCount; ++n) {
-      Clearance& clearance = clearances_[w][n];
-      if (!clearance.due || nowMs < clearance.dueAtMs) continue;
-      if (next != nullptr && next->dueAtMs <= clearance.dueAtMs) continue;
-      next = &clearance;
+      WadiNodeAllClear& allClear = allClears_[w][n];
+      if (!allClear.due || nowMs < allClear.dueAtMs) continue;
+      if (next != nullptr && next->dueAtMs <= allClear.dueAtMs) continue;
+      next = &allClear;
       wadiNode = wadi.wadiNodes[n];
     }
   }
@@ -397,7 +397,7 @@ void Gateway::sendOneWaitingSms(uint64_t nowMs) {
 bool Gateway::sendClosingSms(size_t wadiIndex, size_t recipientIndex) {
   const Recipient& recipient = recipients_.recipients[recipientIndex];
   char text[kMaxSmsTextLength + 1];
-  renderAllClearSms(recipient.language, nameIn(config_.wadis[wadiIndex], recipient.language), text,
+  renderClosingSms(recipient.language, nameIn(config_.wadis[wadiIndex], recipient.language), text,
                     sizeof(text));
   return modem_.sendSms(recipient.phoneNumber, text);
 }

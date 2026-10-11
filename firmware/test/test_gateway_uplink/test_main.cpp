@@ -641,13 +641,13 @@ static void test_with_both_wadi_nodes_sending_their_alerts_again_each_alert_is_f
   const NodeId downstream = site.config.downstreamWadiNode.id;
 
   floodBothWadiNodes(site);
-  const uint64_t resends = 30;
-  site.runMs(resends * site.config.wadiNode.alertResendIntervalMs);
+  const uint64_t refreshes = 30;
+  site.runMs(refreshes * site.config.wadiNode.alertRefreshIntervalMs);
   letTheUplinkCatchUp(site);
 
   // Each wadi node has sent its alert again every minute, three transmissions a time.
-  TEST_ASSERT_TRUE(site.packetsOnAir(PacketKind::Alert, upstream).size() > resends);
-  TEST_ASSERT_TRUE(site.packetsOnAir(PacketKind::Alert, downstream).size() > resends);
+  TEST_ASSERT_TRUE(site.packetsOnAir(PacketKind::Alert, upstream).size() > refreshes);
+  TEST_ASSERT_TRUE(site.packetsOnAir(PacketKind::Alert, downstream).size() > refreshes);
   // One message for each alert, each acknowledgement and each reading, whichever
   // node it came from, and nothing had to be offered twice.
   assertForwarded(site.packetsOnAir(), site);

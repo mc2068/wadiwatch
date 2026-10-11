@@ -79,7 +79,7 @@ void WadiNode::tick() {
   }
 
   // A node with an alert to send again does not go back to dry mode.
-  if (hasAlertToResend()) mode_.onAlertInForce(now);
+  if (hasAlertToRefresh()) mode_.onAlertInForce(now);
 
   const OperatingMode modeBefore = mode_.mode();
   countRain(now);
@@ -96,7 +96,7 @@ void WadiNode::tick() {
 
   handleReceivedFrames(now);
   raiseAlertLevel(now);
-  resendAlert(now);
+  refreshAlert(now);
   repeatAlert(now);
 
   // While an alert still has transmissions to come, nothing else leaves this node.
@@ -223,18 +223,18 @@ void WadiNode::raiseAlertLevel(uint64_t nowMs) {
 
 // Watch is announced once. From Warning up the alert is sent again and again, so that
 // a receiver that missed it, and the node downstream, still hear it.
-bool WadiNode::hasAlertToResend() const { return alertLevel_ >= AlertLevel::Warning; }
+bool WadiNode::hasAlertToRefresh() const { return alertLevel_ >= AlertLevel::Warning; }
 
 void WadiNode::announceAlert(uint64_t nowMs, bool refresh) {
   sendAlert(refresh);
-  nextAlertResendAtMs_ = nowMs + config_.alertResendIntervalMs;
+  nextAlertRefreshAtMs_ = nowMs + config_.alertRefreshIntervalMs;
 }
 
-// Each re-send is a new packet with its own counter: receivers accept it as a refresh,
+// Each alert refresh is a new packet with its own counter: receivers accept it,
 // and it says that it is one. It is an alert like any other, so it goes out several
 // times and takes over from whatever transmissions an earlier alert still had to come.
-void WadiNode::resendAlert(uint64_t nowMs) {
-  if (hasAlertToResend() && nowMs >= nextAlertResendAtMs_) {
+void WadiNode::refreshAlert(uint64_t nowMs) {
+  if (hasAlertToRefresh() && nowMs >= nextAlertRefreshAtMs_) {
     announceAlert(nowMs, /* refresh */ true);
   }
 }
@@ -325,7 +325,7 @@ void WadiNode::transmit(const uint8_t* frame, size_t length) {
   if (length == 0) return;
   radio_.send(frame, length);
   if (holdsWhatAnAllClearEnds()) {
-    answerWindowEndsAtMs_ = clock_.nowMs() + config_.allClearWindowMs;
+    answerWindowEndsAtMs_ = clock_.nowMs() + config_.answerWindowMs;
   }
 }
 
@@ -337,8 +337,8 @@ void WadiNode::sleepUntilNextDue(uint64_t nowMs) {
   } else if (nextHeartbeatAtMs_ < nextDueAtMs) {
     nextDueAtMs = nextHeartbeatAtMs_;
   }
-  if (hasAlertToResend() && nextAlertResendAtMs_ < nextDueAtMs) {
-    nextDueAtMs = nextAlertResendAtMs_;
+  if (hasAlertToRefresh() && nextAlertRefreshAtMs_ < nextDueAtMs) {
+    nextDueAtMs = nextAlertRefreshAtMs_;
   }
   // The end of an open receive window is due work too: the receiver has to be switched off.
   const uint64_t windowEndsAtMs = upstream_.windowEndsAtMs();

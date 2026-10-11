@@ -1,5 +1,5 @@
 // Scenario tests for upstream confirmation: two wadi nodes on one wadi. A node at
-// Warning or above sends its alert again every re-send interval; the node downstream
+// Warning or above sends its alert again every alert refresh interval; the node downstream
 // listens for it, and Warning at both raises Evacuate downstream.
 //
 // Every duration comes from the site configuration. The scenarios step the site one
@@ -136,20 +136,20 @@ void waitForNextAlertFrom(TestSite& site, const Node& node) {
   }
 }
 
-// It starts to rain at the downstream node one step before a re-send of the upstream
+// It starts to rain at the downstream node one step before an alert refresh of the upstream
 // node, which is at Warning or above. Rain puts the downstream node in storm mode and
 // makes it measure at once; from then on each of its measurements comes one step
-// before a re-send, so each re-send falls inside its receive window.
-void rainStartsDownstreamJustBeforeAnUpstreamResend(TestSite& site) {
+// before an alert refresh, so each alert refresh falls inside its receive window.
+void rainStartsDownstreamJustBeforeAnUpstreamAlertRefresh(TestSite& site) {
   const Node upstream = upstreamNode(site);
   const Node downstream = downstreamNode(site);
-  TEST_ASSERT_EQUAL_UINT32_MESSAGE(upstream.config.alertResendIntervalMs,
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(upstream.config.alertRefreshIntervalMs,
                                    downstream.config.mode.stormMeasureIntervalMs,
-                                   "this scenario needs measurements and re-sends in step");
+                                   "this scenario needs measurements and alert refreshes in step");
   TEST_ASSERT_TRUE(downstream.config.upstream.receiveWindowMs > kStepMs);
 
   waitForNextAlertFrom(site, upstream);
-  site.runMs(upstream.config.alertResendIntervalMs - 2 * kStepMs);
+  site.runMs(upstream.config.alertRefreshIntervalMs - 2 * kStepMs);
   downstream.rainGauge.tip();
   site.runMs(kStepMs);
 }
@@ -205,7 +205,7 @@ uint64_t stepsListeningOutsideAnswerWindows(TestSite& site, const Node& node, ui
       sent = true;
     }
     const bool answerWindowOpen =
-        sent && site.clock.nowMs() - lastSentAtMs < node.config.allClearWindowMs;
+        sent && site.clock.nowMs() - lastSentAtMs < node.config.answerWindowMs;
     if (node.radio.isListening() && !answerWindowOpen) ++listening;
   }
   return listening;
@@ -250,7 +250,7 @@ static void test_warning_at_the_upstream_node_and_at_the_downstream_node_produce
   // Then it reaches the downstream node, still short of its Evacuate threshold.
   holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
   waitForAlertLevel(site, downstream, AlertLevel::Evacuate,
-                    upstream.config.alertResendIntervalMs + kStepMs);
+                    upstream.config.alertRefreshIntervalMs + kStepMs);
 
   // The upstream node itself is still at Warning; the siren follows the higher alert.
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, upstream));
@@ -258,12 +258,12 @@ static void test_warning_at_the_upstream_node_and_at_the_downstream_node_produce
   TEST_ASSERT_TRUE(site.siren.isStrobeOn());
 }
 
-static void test_evacuate_follows_within_one_resend_interval_whatever_the_offset_between_the_nodes() {
-  const uint64_t resendIntervalMs = wadiwatch::prototypeSite().wadiNode.alertResendIntervalMs;
+static void test_evacuate_follows_within_one_refresh_interval_whatever_the_offset_between_the_nodes() {
+  const uint64_t refreshIntervalMs = wadiwatch::prototypeSite().wadiNode.alertRefreshIntervalMs;
 
   // The two nodes do not share a clock: try every offset between the upstream
-  // node's re-sends and the downstream node's measurements.
-  for (uint64_t offsetMs = 0; offsetMs < resendIntervalMs; offsetMs += kStepMs) {
+  // node's alert refreshes and the downstream node's measurements.
+  for (uint64_t offsetMs = 0; offsetMs < refreshIntervalMs; offsetMs += kStepMs) {
     TestSite site;
     const Node upstream = upstreamNode(site);
     const Node downstream = downstreamNode(site);
@@ -274,7 +274,7 @@ static void test_evacuate_follows_within_one_resend_interval_whatever_the_offset
     downstream.levelSensor.setWaterLevelCm(levelWithin(downstream, AlertLevel::Warning));
     downstream.rainGauge.tip();
 
-    waitForAlertLevel(site, downstream, AlertLevel::Evacuate, resendIntervalMs + kStepMs);
+    waitForAlertLevel(site, downstream, AlertLevel::Evacuate, refreshIntervalMs + kStepMs);
   }
 }
 
@@ -284,7 +284,7 @@ static void test_an_upstream_warning_heard_in_a_receive_window_is_remembered_unt
   const Node downstream = downstreamNode(site);
   holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
   downstream.levelSensor.setWaterLevelCm(levelBelowWatch(downstream));
-  rainStartsDownstreamJustBeforeAnUpstreamResend(site);
+  rainStartsDownstreamJustBeforeAnUpstreamAlertRefresh(site);
   site.runMs(2ull * downstream.config.mode.stormMeasureIntervalMs);
   TEST_ASSERT_EQUAL_UINT(0, alertsFrom(site, downstream).size());
 
@@ -318,9 +318,9 @@ static void test_warning_at_the_upstream_node_alone_raises_no_alert_at_a_downstr
   downstream.levelSensor.setWaterLevelCm(levelBelowWatch(downstream));
   holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
 
-  // The downstream node is in storm mode and hears every re-send, for as long as
+  // The downstream node is in storm mode and hears every alert refresh, for as long as
   // storm mode lasts and beyond.
-  rainStartsDownstreamJustBeforeAnUpstreamResend(site);
+  rainStartsDownstreamJustBeforeAnUpstreamAlertRefresh(site);
   site.runMs(2ull * downstream.config.mode.stormQuietMs);
 
   TEST_ASSERT_EQUAL_UINT(0, alertsFrom(site, downstream).size());
@@ -333,7 +333,7 @@ static void test_warning_at_the_upstream_node_does_not_raise_a_downstream_watch(
   const Node downstream = downstreamNode(site);
   downstream.levelSensor.setWaterLevelCm(levelBelowWatch(downstream));
   holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
-  rainStartsDownstreamJustBeforeAnUpstreamResend(site);
+  rainStartsDownstreamJustBeforeAnUpstreamAlertRefresh(site);
 
   holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Watch));
   site.runMs(10ull * downstream.config.mode.stormMeasureIntervalMs);
@@ -431,7 +431,7 @@ static void test_warning_at_the_downstream_node_does_not_raise_evacuate_at_the_u
 
   holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
   holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
-  site.runMs(5ull * upstream.config.alertResendIntervalMs);
+  site.runMs(5ull * upstream.config.alertRefreshIntervalMs);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, upstream));
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alertLevelOf(site, downstream));
@@ -448,7 +448,7 @@ static void test_which_node_is_upstream_of_which_comes_from_the_site_configurati
 
   holdLevel(site, second, levelWithin(second, AlertLevel::Warning));
   holdLevel(site, first, levelWithin(first, AlertLevel::Warning));
-  site.runMs(5ull * second.config.alertResendIntervalMs);
+  site.runMs(5ull * second.config.alertRefreshIntervalMs);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alertLevelOf(site, first));
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, second));
@@ -464,26 +464,26 @@ static void test_without_an_upstream_relationship_warning_at_both_nodes_stays_wa
 
   holdLevel(site, first, levelWithin(first, AlertLevel::Warning));
   holdLevel(site, second, levelWithin(second, AlertLevel::Warning));
-  site.runMs(5ull * first.config.alertResendIntervalMs);
+  site.runMs(5ull * first.config.alertRefreshIntervalMs);
 
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, first));
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, second));
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
 }
 
-// --- Re-sending the alert ---
+// --- The alert refresh ---
 
-// At `alertLevel`, the node sends its alert once per re-send interval, on the interval.
-static void assertAlertIsSentAgainEveryResendInterval(AlertLevel alertLevel) {
+// At `alertLevel`, the node sends its alert once per alert refresh interval, on the interval.
+static void assertAlertIsRefreshedEveryRefreshInterval(AlertLevel alertLevel) {
   TestSite site;
   const Node node = upstreamNode(site);
-  const uint64_t resendIntervalMs = node.config.alertResendIntervalMs;
+  const uint64_t refreshIntervalMs = node.config.alertRefreshIntervalMs;
   holdLevel(site, node, levelWithin(node, alertLevel));
   TEST_ASSERT_EQUAL_UINT(1, alertsFrom(site, node).size());
 
   const size_t intervals = 10;
   for (size_t interval = 1; interval <= intervals; ++interval) {
-    site.runMs(resendIntervalMs - kStepMs);
+    site.runMs(refreshIntervalMs - kStepMs);
     TEST_ASSERT_EQUAL_UINT(interval, alertsFrom(site, node).size());
     site.runMs(kStepMs);
     TEST_ASSERT_EQUAL_UINT(interval + 1, alertsFrom(site, node).size());
@@ -497,12 +497,12 @@ static void assertAlertIsSentAgainEveryResendInterval(AlertLevel alertLevel) {
   }
 }
 
-static void test_a_node_at_warning_sends_its_alert_again_every_resend_interval() {
-  assertAlertIsSentAgainEveryResendInterval(AlertLevel::Warning);
+static void test_a_node_at_warning_refreshes_its_alert_every_refresh_interval() {
+  assertAlertIsRefreshedEveryRefreshInterval(AlertLevel::Warning);
 }
 
-static void test_a_node_at_evacuate_sends_its_alert_again_every_resend_interval() {
-  assertAlertIsSentAgainEveryResendInterval(AlertLevel::Evacuate);
+static void test_a_node_at_evacuate_refreshes_its_alert_every_refresh_interval() {
+  assertAlertIsRefreshedEveryRefreshInterval(AlertLevel::Evacuate);
 }
 
 static void test_a_node_at_watch_does_not_send_its_alert_again() {
@@ -510,7 +510,7 @@ static void test_a_node_at_watch_does_not_send_its_alert_again() {
   const Node node = upstreamNode(site);
   holdLevel(site, node, levelWithin(node, AlertLevel::Watch));
 
-  site.runMs(10ull * node.config.alertResendIntervalMs);
+  site.runMs(10ull * node.config.alertRefreshIntervalMs);
 
   TEST_ASSERT_EQUAL_UINT(1, alertsFrom(site, node).size());
 }
@@ -523,7 +523,7 @@ static void test_an_alert_sent_again_carries_the_latest_measured_level() {
   holdLevel(site, node, firstCm);
 
   holdLevel(site, node, laterCm);
-  site.runMs(node.config.alertResendIntervalMs);
+  site.runMs(node.config.alertRefreshIntervalMs);
 
   const std::vector<Packet> alerts = alertsFrom(site, node);
   TEST_ASSERT_TRUE(alerts.size() >= 2);
@@ -531,12 +531,12 @@ static void test_an_alert_sent_again_carries_the_latest_measured_level() {
   TEST_ASSERT_UINT16_WITHIN(1, levelMm(laterCm), alerts.back().alert.levelMm);
 }
 
-static void test_escalating_sends_the_higher_alert_at_once_and_then_every_resend_interval() {
+static void test_escalating_sends_the_higher_alert_at_once_and_then_every_refresh_interval() {
   TestSite site;
   const Node node = upstreamNode(site);
-  const uint64_t resendIntervalMs = node.config.alertResendIntervalMs;
+  const uint64_t refreshIntervalMs = node.config.alertRefreshIntervalMs;
   holdLevel(site, node, levelWithin(node, AlertLevel::Warning));
-  site.runMs(resendIntervalMs / 2);
+  site.runMs(refreshIntervalMs / 2);
 
   holdLevel(site, node, levelWithin(node, AlertLevel::Evacuate));
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alertLevelOf(site, node));
@@ -545,18 +545,18 @@ static void test_escalating_sends_the_higher_alert_at_once_and_then_every_resend
   TEST_ASSERT_EQUAL_UINT(2, alertsAtEvacuate);
 
   // The next one comes a full interval after the escalation.
-  site.runMs(resendIntervalMs - kStepMs);
+  site.runMs(refreshIntervalMs - kStepMs);
   TEST_ASSERT_EQUAL_UINT(alertsAtEvacuate, alertsFrom(site, node).size());
   site.runMs(kStepMs);
   TEST_ASSERT_EQUAL_UINT(alertsAtEvacuate + 1, alertsFrom(site, node).size());
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alertLevelOf(site, node));
 }
 
-static void test_an_alert_raised_between_two_measurements_is_sent_again_one_resend_interval_later() {
+static void test_an_alert_raised_between_two_measurements_is_refreshed_one_refresh_interval_later() {
   TestSite site;
   const Node upstream = upstreamNode(site);
   const Node downstream = downstreamNode(site);
-  const uint64_t resendIntervalMs = downstream.config.alertResendIntervalMs;
+  const uint64_t refreshIntervalMs = downstream.config.alertRefreshIntervalMs;
   holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
 
   // Half-way to the downstream node's next measurement, its upstream node is heard at Warning.
@@ -566,8 +566,8 @@ static void test_an_alert_raised_between_two_measurements_is_sent_again_one_rese
   ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alertLevelOf(site, downstream));
   const size_t alertsAtEvacuate = alertsFrom(site, downstream).size();
 
-  // The node wakes for the re-send on its own, not only at its next measurement.
-  site.runMs(resendIntervalMs - kStepMs);
+  // The node wakes for the alert refresh on its own, not only at its next measurement.
+  site.runMs(refreshIntervalMs - kStepMs);
   TEST_ASSERT_EQUAL_UINT(alertsAtEvacuate, alertsFrom(site, downstream).size());
   site.runMs(kStepMs);
   TEST_ASSERT_EQUAL_UINT(alertsAtEvacuate + 1, alertsFrom(site, downstream).size());
@@ -588,7 +588,7 @@ static void test_a_node_at_warning_stays_in_storm_mode_after_the_level_has_falle
   const size_t alertsBefore = alertsFrom(site, node).size();
   TEST_ASSERT_EQUAL_UINT64(mode.dryMeasureIntervalMs / mode.stormMeasureIntervalMs,
                            stepsWithAMeasurement(site, node, mode.dryMeasureIntervalMs / kStepMs));
-  TEST_ASSERT_EQUAL_UINT(mode.dryMeasureIntervalMs / node.config.alertResendIntervalMs,
+  TEST_ASSERT_EQUAL_UINT(mode.dryMeasureIntervalMs / node.config.alertRefreshIntervalMs,
                          alertsFrom(site, node).size() - alertsBefore);
   ASSERT_ALERT_LEVEL(AlertLevel::Warning, alertLevelOf(site, node));
 }
@@ -605,8 +605,8 @@ static void test_alerts_sent_again_do_not_restart_the_siren_pattern() {
     site.runMs(kStepMs);
   }
 
-  // The pattern keeps time from the first alert, through several re-sends.
-  const uint64_t watchedMs = 3ull * node.config.alertResendIntervalMs + periodMs;
+  // The pattern keeps time from the first alert, through several alert refreshes.
+  const uint64_t watchedMs = 3ull * node.config.alertRefreshIntervalMs + periodMs;
   for (uint64_t elapsed = kStepMs; elapsed < watchedMs; elapsed += kStepMs) {
     site.runMs(kStepMs);
     TEST_ASSERT_EQUAL((elapsed % periodMs) < onMs, site.siren.isOn());
@@ -731,7 +731,7 @@ static void test_airtime_of_each_wadi_node_in_storm_mode_stays_under_the_duty_cy
     for (const Node& node : nodes) holdLevel(site, node, levelWithin(node, level));
   }
 
-  // The first period holds the escalation; the later ones are steady re-sending.
+  // The first period holds the escalation; the later ones are steady alert refreshes.
   const uint64_t periods = 3;
   size_t firstFrame[] = {0, 0};
   for (uint64_t period = 1; period <= periods; ++period) {
@@ -739,12 +739,12 @@ static void test_airtime_of_each_wadi_node_in_storm_mode_stays_under_the_duty_cy
     for (size_t i = 0; i < 2; ++i) {
       const double usedUs = static_cast<double>(timeOnAirUs(site, nodes[i].radio, firstFrame[i]));
       TEST_ASSERT_TRUE_MESSAGE(usedUs < allowedUs, "a wadi node exceeded the duty-cycle limit");
-      // The node really was sending all along: once per re-send interval its alert,
+      // The node really was sending all along: once per alert refresh interval its alert,
       // as many times as an alert goes out, besides its readings.
       const size_t frames = nodes[i].radio.sent().size() - firstFrame[i];
       if (period > 1) {
         TEST_ASSERT_TRUE(frames >= nodes[i].config.alertRepeat.transmissions * periodMs /
-                                       nodes[i].config.alertResendIntervalMs);
+                                       nodes[i].config.alertRefreshIntervalMs);
       }
       firstFrame[i] = nodes[i].radio.sent().size();
     }
@@ -760,13 +760,13 @@ static void test_the_two_wadi_nodes_are_one_event_for_the_gateway_and_the_confir
   const Node upstream = upstreamNode(site);
   const Node downstream = downstreamNode(site);
   const wadiwatch::WadiConfig& wadi = site.config.gateway.wadis[0];
-  const uint64_t resendIntervalMs = upstream.config.alertResendIntervalMs;
+  const uint64_t refreshIntervalMs = upstream.config.alertRefreshIntervalMs;
 
   holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
   holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
-  waitForAlertLevel(site, downstream, AlertLevel::Evacuate, resendIntervalMs + kStepMs);
+  waitForAlertLevel(site, downstream, AlertLevel::Evacuate, refreshIntervalMs + kStepMs);
   // Both nodes go on sending their alerts again; the gateway has time to hand over its SMS.
-  site.runMs(5ull * resendIntervalMs);
+  site.runMs(5ull * refreshIntervalMs);
 
   size_t registered = 0;
   for (const wadiwatch::Recipient& recipient : site.recipients.recipients) {
@@ -795,7 +795,7 @@ static void test_the_two_wadi_nodes_are_one_event_for_the_gateway_and_the_confir
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_warning_at_the_upstream_node_and_at_the_downstream_node_produce_evacuate_downstream);
-  RUN_TEST(test_evacuate_follows_within_one_resend_interval_whatever_the_offset_between_the_nodes);
+  RUN_TEST(test_evacuate_follows_within_one_refresh_interval_whatever_the_offset_between_the_nodes);
   RUN_TEST(test_an_upstream_warning_heard_in_a_receive_window_is_remembered_until_the_node_reaches_warning);
   RUN_TEST(test_warning_at_the_upstream_node_alone_raises_no_alert_at_a_downstream_node_in_dry_mode);
   RUN_TEST(test_warning_at_the_upstream_node_alone_raises_no_alert_at_a_downstream_node_that_hears_it);
@@ -808,12 +808,12 @@ int main(int, char**) {
   RUN_TEST(test_warning_at_the_downstream_node_does_not_raise_evacuate_at_the_upstream_node);
   RUN_TEST(test_which_node_is_upstream_of_which_comes_from_the_site_configuration);
   RUN_TEST(test_without_an_upstream_relationship_warning_at_both_nodes_stays_warning);
-  RUN_TEST(test_a_node_at_warning_sends_its_alert_again_every_resend_interval);
-  RUN_TEST(test_a_node_at_evacuate_sends_its_alert_again_every_resend_interval);
+  RUN_TEST(test_a_node_at_warning_refreshes_its_alert_every_refresh_interval);
+  RUN_TEST(test_a_node_at_evacuate_refreshes_its_alert_every_refresh_interval);
   RUN_TEST(test_a_node_at_watch_does_not_send_its_alert_again);
   RUN_TEST(test_an_alert_sent_again_carries_the_latest_measured_level);
-  RUN_TEST(test_escalating_sends_the_higher_alert_at_once_and_then_every_resend_interval);
-  RUN_TEST(test_an_alert_raised_between_two_measurements_is_sent_again_one_resend_interval_later);
+  RUN_TEST(test_escalating_sends_the_higher_alert_at_once_and_then_every_refresh_interval);
+  RUN_TEST(test_an_alert_raised_between_two_measurements_is_refreshed_one_refresh_interval_later);
   RUN_TEST(test_a_node_at_warning_stays_in_storm_mode_after_the_level_has_fallen);
   RUN_TEST(test_alerts_sent_again_do_not_restart_the_siren_pattern);
   RUN_TEST(test_in_dry_mode_neither_wadi_node_switches_its_receiver_on);

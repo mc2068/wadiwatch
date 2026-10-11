@@ -34,14 +34,14 @@ struct WadiNodeConfig {
   AlertRepeatConfig alertRepeat;
   // Which wadi node is upstream of this one, and how long this one listens for it.
   UpstreamConfig upstream;
-  // While at Warning or above, the node sends its alert again this long after it last
-  // sent it. Must be longer than an alert takes to go out all its times.
-  uint32_t alertResendIntervalMs;
+  // The alert refresh: while at Warning or above, the node sends its alert again this
+  // long after it last sent it. Must be longer than an alert takes to go out all its times.
+  uint32_t alertRefreshIntervalMs;
   // The answer window: while the node holds an alert level, or remembers one heard
   // from its upstream node, its receiver stays on for this long after each packet
   // it transmits. That is when the gateway answers with the all clear. Must be
   // longer than the gateway takes to hear a packet and transmit its answer.
-  uint32_t allClearWindowMs;
+  uint32_t answerWindowMs;
 };
 
 struct SirenNodeConfig {
@@ -50,7 +50,7 @@ struct SirenNodeConfig {
   uint32_t intermittentOnMs;
   uint32_t intermittentOffMs;
   // A latched Warning or Evacuate that hears no alert from its wadi node for this
-  // long falls silent. Must be several times the wadi node's alert re-send interval.
+  // long falls silent. Must be several times the wadi node's alert refresh interval.
   uint32_t alertRefreshTimeoutMs;
   // A test started with the button ends by itself after this long.
   uint32_t testDurationMs;
@@ -105,7 +105,7 @@ struct GatewayConfig {
   // A wadi node hears the all clear only in the answer window after a packet of its
   // own. The gateway holds the all clear for a wadi node until it next hears that
   // node, and for this long at most: then it transmits anyway, for the siren nodes.
-  // Must be longer than the wadi nodes' alert re-send interval, so that a node at
+  // Must be longer than the wadi nodes' alert refresh interval, so that a node at
   // Warning or above is heard first.
   uint32_t allClearHoldMs;
   // A wadi node that held an alert level when the all clear was issued is given the

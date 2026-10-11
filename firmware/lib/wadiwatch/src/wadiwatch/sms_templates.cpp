@@ -190,7 +190,7 @@ size_t renderAlertSms(Language language, AlertLevel alertLevel, const char* wadi
 
 const char* allClearName(Language language) { return wordingIn(language).allClear.name; }
 
-size_t renderAllClearSms(Language language, const char* wadiName, char* buffer, size_t capacity) {
+size_t renderClosingSms(Language language, const char* wadiName, char* buffer, size_t capacity) {
   if (capacity == 0) return 0;
   return render(wordingIn(language).allClear, wadiName, buffer, capacity);
 }

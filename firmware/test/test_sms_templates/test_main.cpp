@@ -195,7 +195,7 @@ static void test_the_text_is_terminated_and_its_length_returned() {
 
 static std::string renderClosing(Language language, const char* wadiName) {
   char text[kMaxSmsTextLength + 1];
-  const size_t length = wadiwatch::renderAllClearSms(language, wadiName, text, sizeof(text));
+  const size_t length = wadiwatch::renderClosingSms(language, wadiName, text, sizeof(text));
   return std::string(text, length);
 }
 
@@ -273,7 +273,7 @@ static void test_a_closing_text_too_long_for_the_buffer_is_cut_between_character
       char guarded[kMaxSmsTextLength + 2];
       std::memset(guarded, '#', sizeof(guarded));
 
-      const size_t length = wadiwatch::renderAllClearSms(language, wadiName, guarded, capacity);
+      const size_t length = wadiwatch::renderClosingSms(language, wadiName, guarded, capacity);
 
       TEST_ASSERT_TRUE(length < capacity);
       TEST_ASSERT_EQUAL_CHAR('\0', guarded[length]);

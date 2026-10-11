@@ -134,10 +134,10 @@ void SirenNode::handleButton(uint64_t nowMs) {
   send(test);
 }
 
-// A wadi node at Warning or above re-sends its alert. When a latched Warning or
+// A wadi node at Warning or above sends an alert refresh every minute. When a latched Warning or
 // Evacuate has heard nothing for the whole timeout, the siren node stops sounding
 // for it and says so in a heartbeat straight away. The alert stays latched: the
-// next alert from that wadi node sounds the siren again. Watch is not re-sent and
+// next alert from that wadi node sounds the siren again. Watch has no alert refresh and
 // is silent anyway, so it is left alone.
 void SirenNode::checkAlertRefresh(uint64_t nowMs) {
   bool lostNow = false;

@@ -27,7 +27,7 @@ class UpstreamLink {
   // Whether the receiver should be on now, for a node in `mode` whose own alert level is
   // `alertLevel`. A node with no upstream node never listens; in dry mode nobody does.
   //  - In storm mode the receiver is on during the receive window after each measurement.
-  //  - At Warning it stays on between measurements: the upstream node's next re-send is
+  //  - At Warning it stays on between measurements: the upstream node's next alert refresh is
   //    all that is missing for Evacuate, and it must not fall outside a short window.
   //  - At Evacuate it is off: nothing the upstream node says can raise the alert level further.
   bool wantsReceiver(uint64_t nowMs, OperatingMode mode, AlertLevel alertLevel) const;

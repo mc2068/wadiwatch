@@ -336,7 +336,7 @@ static void test_repeated_alert_packets_at_the_same_level_send_no_additional_sms
   TEST_ASSERT_TRUE(warningsSoFar >= 1);
 
   // The alert stays in force for half an hour. The wadi node sends Warning again every
-  // re-send interval; on top of that, every few minutes it is power-cycled and raises
+  // alert refresh interval; on top of that, every few minutes it is power-cycled and raises
   // Warning afresh, and every frame of the event so far (the earlier Watch among them)
   // is transmitted again byte for byte.
   const size_t repeats = 5;
@@ -631,7 +631,7 @@ static void test_readings_from_a_storm_that_raises_no_alert_send_no_sms() {
 static void test_a_reading_that_carries_an_alert_level_is_not_an_alert() {
   // At Watch: a Watch alert is sent once, so that from then on the alert level
   // travels in the readings alone. (From Warning up the alert itself is sent again
-  // every re-send interval.)
+  // every alert refresh interval.)
   SmsSite site;
   floodTo(site, AlertLevel::Watch);
   letSmsGoOut(site);

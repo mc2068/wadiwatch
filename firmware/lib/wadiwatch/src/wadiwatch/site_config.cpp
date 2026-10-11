@@ -90,8 +90,8 @@ SiteConfig makePrototypeSite() {
               /* node */ kNoNode,
               /* receiveWindowMs */ 3000u,
           },
-          /* alertResendIntervalMs */ 1u * kMinuteMs,
-          /* allClearWindowMs */ 2000u,
+          /* alertRefreshIntervalMs */ 1u * kMinuteMs,
+          /* answerWindowMs */ 2000u,
       },
       /* downstreamWadiNode */ {},  // filled in below
       /* sirenNode */ {

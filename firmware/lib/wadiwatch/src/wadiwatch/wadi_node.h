@@ -48,9 +48,9 @@ class WadiNode {
   void handleAllClear(const Packet& allClear, uint64_t nowMs);
   bool holdsWhatAnAllClearEnds() const;
   void raiseAlertLevel(uint64_t nowMs);
-  bool hasAlertToResend() const;
+  bool hasAlertToRefresh() const;
   void announceAlert(uint64_t nowMs, bool refresh);
-  void resendAlert(uint64_t nowMs);
+  void refreshAlert(uint64_t nowMs);
   void switchReceiver(uint64_t nowMs);
   void sendAlert(bool refresh);
   void repeatAlert(uint64_t nowMs);
@@ -78,7 +78,7 @@ class WadiNode {
   bool receiverOn_ = false;
   // The receiver stays on until then after a transmission, for the gateway's answer.
   uint64_t answerWindowEndsAtMs_ = 0;
-  uint64_t nextAlertResendAtMs_ = 0;
+  uint64_t nextAlertRefreshAtMs_ = 0;
   bool started_ = false;
   uint64_t nextMeasurementAtMs_ = 0;
   uint64_t nextHeartbeatAtMs_ = 0;
