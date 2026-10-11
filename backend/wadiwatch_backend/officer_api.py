@@ -49,7 +49,8 @@ class Refused(Exception):
         self.error = error
 
 
-def _answer(content, status_code=200):
+def answer(content, status_code=200):
+    """A JSON answer that nothing in between may keep a copy of."""
     return JSONResponse(content, status_code=status_code, headers=NO_STORE)
 
 
@@ -80,7 +81,7 @@ def add_officer_routes(app: FastAPI, backend, secure_cookies=False):
 
     @app.exception_handler(Refused)
     async def refused(request, refusal):
-        return _answer({"error": refusal.error}, refusal.status_code)
+        return answer({"error": refusal.error}, refusal.status_code)
 
     def signed_in(session):
         return {"signed_in": True, "officer": session.officer, "csrf_token": session.csrf_token}
@@ -88,7 +89,7 @@ def add_officer_routes(app: FastAPI, backend, secure_cookies=False):
     @app.get("/api/alert-log")
     def alert_log(request: Request):
         session = officers.session(request.cookies.get(SESSION_COOKIE))
-        return _answer(
+        return answer(
             {
                 "signed_in_as": session.officer if session else None,
                 "entries": backend.alert_log(show_officers=session is not None),
@@ -98,7 +99,7 @@ def add_officer_routes(app: FastAPI, backend, secure_cookies=False):
     @app.get("/api/session")
     def session_state(request: Request):
         session = officers.session(request.cookies.get(SESSION_COOKIE))
-        return _answer(signed_in(session) if session else {"signed_in": False})
+        return answer(signed_in(session) if session else {"signed_in": False})
 
     @app.post("/api/session")
     async def sign_in(request: Request):
@@ -123,7 +124,7 @@ def add_officer_routes(app: FastAPI, backend, secure_cookies=False):
         token, session = result
         # A browser that signs in again does not leave its old session behind.
         officers.sign_out(request.cookies.get(SESSION_COOKIE))
-        response = _answer(signed_in(session))
+        response = answer(signed_in(session))
         response.set_cookie(
             SESSION_COOKIE,
             token,
@@ -143,7 +144,7 @@ def add_officer_routes(app: FastAPI, backend, secure_cookies=False):
         if officers.session(token) is not None:
             officer_session(request, officers, "sign out")
             officers.sign_out(token)
-        response = _answer({"signed_in": False})
+        response = answer({"signed_in": False})
         response.delete_cookie(
             SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=secure_cookies
         )
@@ -156,7 +157,7 @@ def add_officer_routes(app: FastAPI, backend, secure_cookies=False):
             acknowledgement = backend.acknowledge_alert(alert_id, session.officer)
         except UnknownAlert:
             raise Refused(404, "There is no such alert in the alert log") from None
-        return _answer(
+        return answer(
             {
                 "alert": alert_id,
                 "acknowledgement": {"ts": acknowledgement.ts, "officer": acknowledgement.officer},

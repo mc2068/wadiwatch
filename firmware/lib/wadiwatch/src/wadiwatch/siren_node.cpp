@@ -57,7 +57,7 @@ void SirenNode::start(uint64_t nowMs) {
   for (size_t i = 0; i < latchCount_; ++i) {
     LatchedAlert& latch = latches_[i];
     uint32_t stored = 0;
-    if (storage_.load(storageKey(StorageRecord::LatchedAlert, latch.wadiNode), stored) &&
+    if (storage_.load(storageKey(StorageRecord::LatchedAlert, latch.node), stored) &&
         stored <= static_cast<uint32_t>(AlertLevel::Evacuate)) {
       latch.alertLevel = static_cast<AlertLevel>(stored);
     }
@@ -207,16 +207,16 @@ void SirenNode::send(Packet& packet) {
   if (length > 0) radio_.send(frame, length);
 }
 
-SirenNode::LatchedAlert* SirenNode::latchFor(NodeId wadiNode) {
+SirenNode::LatchedAlert* SirenNode::latchFor(NodeId node) {
   for (size_t i = 0; i < latchCount_; ++i) {
-    if (latches_[i].wadiNode == wadiNode) return &latches_[i];
+    if (latches_[i].node == node) return &latches_[i];
   }
   return nullptr;
 }
 
 // Written whenever the latched alert level changes, so that it survives a restart.
 void SirenNode::storeLatch(const LatchedAlert& latch) {
-  storage_.store(storageKey(StorageRecord::LatchedAlert, latch.wadiNode),
+  storage_.store(storageKey(StorageRecord::LatchedAlert, latch.node),
                  static_cast<uint32_t>(latch.alertLevel));
 }
 

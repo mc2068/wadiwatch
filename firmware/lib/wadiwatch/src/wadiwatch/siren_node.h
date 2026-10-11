@@ -41,7 +41,10 @@ class SirenNode {
   // What one node of the site has this siren node doing. Alerts are latched per
   // wadi node because an all clear ends the event at one wadi node only.
   struct LatchedAlert {
-    NodeId wadiNode;
+    // The node the alert was heard from. Only wadi nodes send alerts, but the site
+    // configuration does not tell a siren node which nodes those are: it keeps a
+    // slot for every other node of the site.
+    NodeId node;
     // Highest alert level heard from that node since its last all clear.
     AlertLevel alertLevel;
     // When an alert was last accepted from that node.
@@ -59,7 +62,7 @@ class SirenNode {
   void driveOutput(uint64_t nowMs);
   void sendHeartbeat();
   void send(Packet& packet);
-  LatchedAlert* latchFor(NodeId wadiNode);
+  LatchedAlert* latchFor(NodeId node);
   void storeLatch(const LatchedAlert& latch);
   AlertLevel soundingAlertLevel() const;
   bool refreshLost() const;

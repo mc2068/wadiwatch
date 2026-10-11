@@ -23,20 +23,15 @@ clear shows in the alert log when the gateway reports having transmitted it.
 """
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 
 from .backend import AllClearRefused, GatewayUnreachable, UnknownWadi
-from .officer_api import NO_STORE, Refused, officer_session
-
-
-def _answer(content, status_code=200):
-    return JSONResponse(content, status_code=status_code, headers=NO_STORE)
+from .officer_api import Refused, answer, officer_session
 
 
 def add_all_clear_routes(app: FastAPI, backend):
     @app.get("/api/wadis")
     def wadis():
-        return _answer(backend.all_clear_verdicts())
+        return answer(backend.all_clear_verdicts())
 
     @app.post("/api/wadis/{wadi_id}/all-clear")
     def issue_all_clear(wadi_id: int, request: Request):
@@ -46,7 +41,7 @@ def add_all_clear_routes(app: FastAPI, backend):
         except UnknownWadi:
             raise Refused(404, "The site has no such wadi") from None
         except AllClearRefused as refused:
-            return _answer(
+            return answer(
                 {"error": f"All clear refused. {refused.verdict['refusal']}", **refused.verdict},
                 status_code=409,
             )
@@ -54,4 +49,4 @@ def add_all_clear_routes(app: FastAPI, backend):
             raise Refused(
                 503, "The all clear was not sent: the backend has no connection to the gateway"
             ) from None
-        return _answer(command)
+        return answer(command)

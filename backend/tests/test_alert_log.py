@@ -2,6 +2,7 @@
 
 import json
 
+from conftest import gateway_output
 from wadiwatch_backend.replay import DEFAULT_SCENARIO, load_scenario, replay
 
 
@@ -293,3 +294,52 @@ def test_the_flood_scenario_leaves_a_reviewable_alert_log(
             assert (siren_acknowledgements(entry)[siren.id] is not None) == sounded
             if sounded:
                 assert 0 <= siren_acknowledgements(entry)[siren.id] - entry["ts"] <= 5
+
+
+# The map and the alert log each work out which alerts are in force, in their own way:
+# the map from each wadi node's latest alert and all clear, the log by reading every
+# message in order. They must never disagree.
+
+
+def assert_map_and_log_agree(harness, visitor, site):
+    in_force = {
+        entry["node"]: entry["alert_level"] for entry in visitor.alerts() if entry["in_force"]
+    }
+    nodes = harness.nodes()
+    for node in site.wadi_nodes:
+        assert nodes[node.id]["alert_level"] == in_force.get(node.id, "none"), node.name
+
+
+def test_the_map_and_the_alert_log_agree_on_the_alerts_in_force_through_a_whole_event(
+    harness, visitor, site
+):
+    for message in load_scenario(DEFAULT_SCENARIO):
+        if harness.ingest_raw(json.dumps(message)).status != "stored":
+            continue
+        if message["kind"] in ("alert", "all_clear"):
+            assert_map_and_log_agree(harness, visitor, site)
+    assert_map_and_log_agree(harness, visitor, site)
+
+
+def test_the_map_and_the_alert_log_agree_on_what_the_gateway_core_produces(harness, visitor, site):
+    for raw in gateway_output():
+        assert harness.ingest_raw(raw).status == "stored"
+        assert_map_and_log_agree(harness, visitor, site)
+
+
+def test_the_map_and_the_alert_log_agree_when_a_node_states_no_alert_or_is_cleared_twice(
+    harness, visitor, site, upstream, downstream
+):
+    steps = [
+        ("alert", upstream.id, {"alert_level": "warning"}),
+        ("alert", downstream.id, {"alert_level": "watch"}),
+        ("alert", upstream.id, {"alert_level": "none"}),
+        ("alert", upstream.id, {"alert_level": "evacuate"}),
+        ("all_clear", site.gateway.id, {"wadi_node": upstream.id}),
+        ("all_clear", site.gateway.id, {"wadi_node": upstream.id}),
+        ("alert", upstream.id, {"alert_level": "evacuate"}),
+        ("all_clear", site.gateway.id, {"wadi_node": downstream.id}),
+    ]
+    for kind, node, fields in steps:
+        assert harness.ingest(kind, node, **fields).status == "stored"
+        assert_map_and_log_agree(harness, visitor, site)
