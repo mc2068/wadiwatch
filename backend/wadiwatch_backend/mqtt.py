@@ -19,6 +19,14 @@ CLIENT_ID = "wadiwatch-backend"
 QOS = 1
 
 
+def _paho_client():
+    import paho.mqtt.client as mqtt
+
+    # A fixed client identifier with a persistent session lets the broker
+    # keep messages for the backend while it is restarting.
+    return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=CLIENT_ID, clean_session=False)
+
+
 class MqttUplink:
     def __init__(
         self,
@@ -29,7 +37,10 @@ class MqttUplink:
         username=None,
         password=None,
         command_topic=COMMAND_TOPIC,
+        make_client=None,
     ):
+        """`make_client`, if given, is called by `start` for the MQTT client to use
+        in place of a real one: the seam for tests, which have no broker."""
         self._ingest = ingest
         self._host = host
         self._port = port
@@ -37,16 +48,11 @@ class MqttUplink:
         self._command_topic = command_topic
         self._username = username
         self._password = password
+        self._make_client = make_client or _paho_client
         self._client = None
 
     def start(self):
-        import paho.mqtt.client as mqtt
-
-        # A fixed client identifier with a persistent session lets the broker
-        # keep messages for the backend while it is restarting.
-        client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, client_id=CLIENT_ID, clean_session=False
-        )
+        client = self._make_client()
         if self._username:
             client.username_pw_set(self._username, self._password)
         client.on_connect = self.on_connect

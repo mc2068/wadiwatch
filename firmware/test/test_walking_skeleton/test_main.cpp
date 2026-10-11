@@ -30,7 +30,7 @@ static void test_level_below_warning_threshold_produces_no_siren_output() {
   TestSite site;
   site.levelSensor.setWaterLevelCm(warningLevelCm(site) * 0.8f);
 
-  site.runMinutes(30);
+  site.runMs(2ull * site.config.wadiNode.mode.dryMeasureIntervalMs);
 
   // This level is above the Watch threshold, so a Watch alert is on the air; Watch never sounds the siren.
   TEST_ASSERT_FALSE(site.siren.isOn());
@@ -42,15 +42,15 @@ static void test_level_crossing_warning_threshold_turns_siren_on() {
   const float warningCm = warningLevelCm(site);
 
   site.levelSensor.setWaterLevelCm(warningCm * 0.5f);
-  site.runMinutes(10);
+  site.runMs(site.config.wadiNode.mode.dryMeasureIntervalMs);
   TEST_ASSERT_FALSE(site.siren.isOn());
 
   // It starts to rain, which puts the node in storm mode, and the wadi rises by
-  // 10% of the threshold each minute until it is well past it.
+  // 10% of the threshold from one measurement to the next until it is well past it.
   site.rainGauge.tip();
   for (float fraction = 0.6f; fraction < 1.25f; fraction += 0.1f) {
     site.levelSensor.setWaterLevelCm(warningCm * fraction);
-    site.runMinutes(1);
+    site.runMs(site.config.wadiNode.mode.stormMeasureIntervalMs);
   }
 
   TEST_ASSERT_TRUE(site.listenToSiren() != SirenSound::Silent);
@@ -60,7 +60,7 @@ static void test_in_dry_mode_siren_sounds_within_one_measurement_interval_of_the
   TestSite site;
   site.levelSensor.setWaterLevelCm(0);
   // The wadi is dry and there is no rain, so the node is in dry mode.
-  site.runMinutes(5);
+  site.runMs(5ull * site.config.wadiNode.mode.stormMeasureIntervalMs);
 
   site.levelSensor.setWaterLevelCm(warningLevelCm(site));
 
@@ -72,7 +72,7 @@ static void test_in_storm_mode_siren_sounds_within_one_measurement_interval_of_t
   site.levelSensor.setWaterLevelCm(0);
   // It has started to rain: the first tip of the rain gauge puts the node in storm mode.
   site.rainGauge.tip();
-  site.runMinutes(5);
+  site.runMs(5ull * site.config.wadiNode.mode.stormMeasureIntervalMs);
 
   site.levelSensor.setWaterLevelCm(warningLevelCm(site));
 
@@ -84,7 +84,7 @@ static void test_malformed_frame_does_not_sound_siren() {
 
   site.air.inject({0xFF, 0x00, 0x13, 0x37});
   site.air.inject({});
-  site.runMinutes(1);
+  site.runMs(site.config.wadiNode.mode.stormMeasureIntervalMs);
 
   TEST_ASSERT_FALSE(site.siren.isOn());
 }

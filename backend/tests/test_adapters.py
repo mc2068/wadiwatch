@@ -102,12 +102,19 @@ def test_malformed_mqtt_message_is_dropped_and_the_subscriber_keeps_going(harnes
 
 
 class FakeMqttClient:
-    """As much of the MQTT client as sending a command touches."""
+    """As much of the MQTT client as the adapter touches: started like the real one,
+    it is connected to the broker or not, as the scenario says."""
 
     def __init__(self, connected, rc=0):
         self.connected = connected
         self.rc = rc
         self.published = []
+
+    def connect_async(self, host, port):
+        pass
+
+    def loop_start(self):
+        pass
 
     def is_connected(self):
         return self.connected
@@ -118,8 +125,9 @@ class FakeMqttClient:
 
 
 def uplink_with(harness, client):
-    uplink = MqttUplink(harness.backend.ingest, host="broker.invalid")
-    uplink._client = client
+    """The adapter, started, with `client` as its MQTT client."""
+    uplink = MqttUplink(harness.backend.ingest, host="broker.invalid", make_client=lambda: client)
+    uplink.start()
     return uplink
 
 

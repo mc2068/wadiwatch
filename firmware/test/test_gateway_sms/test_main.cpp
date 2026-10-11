@@ -176,6 +176,12 @@ void letSmsGoOutAfterOutage(TestSite& site) {
   site.runMs(site.config.gateway.smsRetryIntervalMs + kSmsTargetMs);
 }
 
+// A GSM outage goes on: long enough for the gateway to ask the modem again, and be
+// refused, this many times.
+void gsmStaysDownFor(TestSite& site, uint64_t retries) {
+  site.runMs(retries * site.config.gateway.smsRetryIntervalMs);
+}
+
 std::vector<std::string> textsSentTo(const TestSite& site, const Recipient& recipient) {
   std::vector<std::string> texts;
   for (const Sms& sms : site.modem.sent()) {
@@ -220,7 +226,7 @@ static void test_a_wadi_below_the_watch_threshold_sends_no_sms() {
   SmsSite site;
   site.levelSensor.setWaterLevelCm(thresholdCm(site, AlertLevel::Watch) / 2.0f);
 
-  site.runMinutes(30);
+  site.runMs(2ull * site.config.wadiNode.mode.dryMeasureIntervalMs);
 
   TEST_ASSERT_EQUAL_UINT(0, site.modem.sent().size());
 }
@@ -335,16 +341,16 @@ static void test_repeated_alert_packets_at_the_same_level_send_no_additional_sms
   const size_t warningsSoFar = alertsOnAirAt(site, AlertLevel::Warning);
   TEST_ASSERT_TRUE(warningsSoFar >= 1);
 
-  // The alert stays in force for half an hour. The wadi node sends Warning again every
-  // alert refresh interval; on top of that, every few minutes it is power-cycled and raises
-  // Warning afresh, and every frame of the event so far (the earlier Watch among them)
-  // is transmitted again byte for byte.
+  // The alert stays in force for a long time. The wadi node sends Warning again every
+  // alert refresh interval; on top of that, every few intervals it is power-cycled and
+  // raises Warning afresh, and every frame of the event so far (the earlier Watch among
+  // them) is transmitted again byte for byte.
   const size_t repeats = 5;
   for (size_t repeat = 0; repeat < repeats; ++repeat) {
     raiseAlertAgain(site);
     const std::vector<Frame> heardSoFar = site.air.transmitted();
     for (const Frame& frame : heardSoFar) site.air.inject(frame);
-    site.runMinutes(6);
+    site.runMs(6ull * site.config.wadiNode.alertRefreshIntervalMs);
   }
 
   // The Warning went out again each time, in packets a receiver accepts, and nobody
@@ -402,7 +408,7 @@ static void test_sms_queued_during_a_gsm_outage_are_each_sent_exactly_once_on_re
   site.modem.startOutage();
 
   floodTo(site, AlertLevel::Warning);
-  site.runMinutes(10);
+  gsmStaysDownFor(site, 20);
 
   // Nothing got through, though the gateway asked; the siren does not depend on GSM.
   TEST_ASSERT_EQUAL_UINT(0, site.modem.sent().size());
@@ -419,7 +425,7 @@ static void test_sms_queued_during_a_gsm_outage_are_each_sent_exactly_once_on_re
   TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
 
   // And none of them is sent again later.
-  site.runMinutes(30);
+  site.runMs(60ull * site.config.gateway.smsRetryIntervalMs);
   TEST_ASSERT_EQUAL_UINT(4, site.modem.sent().size());
 }
 
@@ -432,7 +438,7 @@ static void test_a_gsm_outage_that_starts_part_way_through_resends_nothing_alrea
   }
 
   site.modem.startOutage();
-  site.runMinutes(5);
+  gsmStaysDownFor(site, 10);
   site.modem.endOutage();
   letSmsGoOutAfterOutage(site);
 
@@ -448,11 +454,11 @@ static void test_an_sms_overtaken_by_a_higher_alert_level_during_an_outage_is_re
   site.modem.startOutage();
 
   floodTo(site, AlertLevel::Watch);
-  site.runMinutes(2);
+  gsmStaysDownFor(site, 4);
   floodTo(site, AlertLevel::Warning);
-  site.runMinutes(2);
+  gsmStaysDownFor(site, 4);
   floodTo(site, AlertLevel::Evacuate);
-  site.runMinutes(2);
+  gsmStaysDownFor(site, 4);
   site.modem.endOutage();
   letSmsGoOutAfterOutage(site);
 
@@ -595,7 +601,7 @@ static void test_malformed_frames_send_no_sms() {
   site.air.inject({0xFF, 0x00, 0x13, 0x37});
   site.air.inject({});
   site.air.inject(Frame(200, 0x01));
-  site.runMinutes(5);
+  letSmsGoOut(site);
 
   TEST_ASSERT_EQUAL_UINT(0, site.modem.sent().size());
 
@@ -613,7 +619,7 @@ static void test_readings_from_a_storm_that_raises_no_alert_send_no_sms() {
 
   // A little rain, far short of the Watch rainfall: storm mode and nothing more.
   site.rainGauge.tip();
-  site.runMinutes(20);
+  site.runMs(20ull * site.config.wadiNode.mode.stormMeasureIntervalMs);
 
   TEST_ASSERT_TRUE(site.packetsOnAir(PacketKind::Reading).size() > 0);
   TEST_ASSERT_EQUAL_UINT(0, site.packetsOnAir(PacketKind::Alert).size());
@@ -641,7 +647,7 @@ static void test_a_reading_that_carries_an_alert_level_is_not_an_alert() {
   // from now on say Watch, which would be news to it; but only an alert packet is.
   site.restartGateway();
   const size_t readingsBefore = site.packetsOnAir(PacketKind::Reading).size();
-  site.runMinutes(10);
+  site.runMs(10ull * site.config.wadiNode.mode.stormMeasureIntervalMs);
 
   const std::vector<Packet> readings = site.packetsOnAir(PacketKind::Reading);
   TEST_ASSERT_TRUE(readings.size() > readingsBefore);

@@ -48,10 +48,10 @@ static void floodWadi(TestSite& site) {
   }
 }
 
-// A minute goes by, then a bystander listens: at Warning the siren comes and
-// goes, so it is listened to over a whole pattern period.
+// An alert refresh interval goes by, then a bystander listens: at Warning the siren
+// comes and goes, so it is listened to over a whole pattern period.
 static bool sirenSounds(TestSite& site) {
-  site.runMinutes(1);
+  site.runMs(site.config.wadiNode.alertRefreshIntervalMs);
   const bool sounds = site.listenToSiren() != SirenSound::Silent;
   // The strobe never disagrees with the siren about whether there is an alert.
   TEST_ASSERT_EQUAL(sounds, site.siren.isStrobeOn());
@@ -123,7 +123,7 @@ static void test_replayed_alert_does_not_sound_the_siren() {
   // the wadi node, still on the air, drops its alert: from here on nothing but the
   // recording could sound the siren again.
   site.levelSensor.setWaterLevelCm(0);
-  site.runMinutes(2);
+  site.runMs(2ull * site.config.wadiNode.mode.stormMeasureIntervalMs);
   issueAllClear(site);
   TEST_ASSERT_FALSE(sirenSounds(site));
   // A power cycle does not make the siren node forget what it accepted.

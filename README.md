@@ -32,6 +32,39 @@ node build.js
 
 `node build.js` writes the `.docx` and `out/preview.html`. Print the HTML to PDF from Chrome (A4, no headers and footers) to refresh the preview PDF.
 
+## Conventions
+
+The rules the code and the tests are written to. A change that needs to break one says so in its commit message.
+
+Vocabulary and decisions:
+
+- `CONTEXT.md` fixes the vocabulary. Use its terms exactly, in code, tests, documents and the contract; do not introduce synonyms.
+- `docs/adr/` holds the design decisions. Do not contradict one without a new decision record.
+
+Firmware code:
+
+- `firmware/lib/wadiwatch` is the portable core. It compiles as C++11 for the ESP32 toolchain: no Arduino or ESP headers, no exceptions, no RTTI, no heap allocation in steady state, fixed-size buffers.
+- A core touches the outside world only through ports (`ports.h`). New hardware means a new port and a fake of it in `firmware/lib/wadiwatch_testing`.
+- Every site-specific value (identifiers, thresholds, timings) lives in the site configuration, `site_config.cpp`, and nowhere else. No magic numbers in cores. What the backend site file copies from it is held to it by a test (see `test_gateway_contract` below).
+- Keys are site-specific too, and secret: the repository holds labelled test keys only. A real site key and a real command key are supplied locally and never committed.
+- No external crypto library: SHA-256 and HMAC are implemented small inside the core library and tested against published vectors.
+- The ESP32 entry points in `firmware/src` keep compiling, with no warning from project code under `-Wall -Wextra`.
+
+Tests:
+
+- Test through the seams: the device ports for firmware (whole scenarios on `TestSite`, with the fake clock and the in-memory radio), the one ingest function and the HTTP API for the backend.
+- Assert only what an outside observer could see: frames on the air, siren and strobe output, SMS handed to the modem, messages handed to the uplink, API responses. Do not add getters to a core, or reach into private state, for a test.
+- No magic numbers in tests either: a scenario takes its durations, thresholds and identifiers from the site configuration (firmware) or the site file (backend), so that it still holds when a value is recalibrated. Keys come from the configuration too.
+- Write the failing scenario first, then the code. Every existing test still passes.
+
+The gateway contract:
+
+- `docs/gateway-contract.md` is the contract between gateway and backend. Change it together with its executable forms on both sides and the shared example files in `docs/gateway-contract/`, in one commit; regenerate the generated ones as the document says.
+
+Anonymity and personal data:
+
+- No personal names, school or Student Branch name in any file. No real phone numbers, keys or credentials in the repository.
+
 ## Firmware
 
 The logic of each device is a portable core that reaches the outside world only through ports (level sensor, clock, radio, siren output, GSM modem, persistent storage). On the ESP32 the ports are hardware adapters; in tests they are fakes joined by an in-memory radio, so whole flood scenarios run on a PC in milliseconds with no hardware.

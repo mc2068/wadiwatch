@@ -276,6 +276,12 @@ void endOutage(TestSite& site) {
   letTheUplinkCatchUp(site);
 }
 
+// Time goes by in which the scenario sends nothing: this many of the gateway's uplink
+// retry intervals, so that whatever the gateway would offer its uplink again, it has.
+void quietSpell(TestSite& site, uint64_t retryIntervals) {
+  site.runMs(retryIntervals * site.config.gateway.uplinkRetryIntervalMs);
+}
+
 // The battery voltage below which the site configuration calls this node's battery low.
 uint16_t lowBatteryMillivolts(const TestSite& site, NodeId node) {
   const GatewayConfig& gateway = site.config.gateway;
@@ -592,13 +598,13 @@ static void test_packets_the_gateway_refuses_are_not_forwarded() {
   site.air.inject(signedReading(strangersKey, site.wadiNodeOnAir.id));
   site.air.inject(signedReading(site.config.auth, site.nodeIdOutsideSite()));
   site.air.inject({0xFF, 0x00, 0x13, 0x37});
-  site.runMinutes(1);
+  quietSpell(site, 2);
   TEST_ASSERT_EQUAL_UINT(0, site.uplink.attempts());
 
   // A genuine packet, and then the same bytes again from a recorder.
   const Packet genuine = site.transmit(site.wadiNodeOnAir, reading(500));
   site.air.inject(site.wadiNodeOnAir.lastFrame);
-  site.runMinutes(1);
+  quietSpell(site, 2);
 
   assertForwarded({genuine}, site);
 }
@@ -635,7 +641,7 @@ static void test_an_alert_whose_first_transmission_is_lost_is_forwarded_once_fro
   const uint32_t heardAt = site.wallClock.unixSeconds();
   site.runMs(2 * TestSite::kStepMs);
   wadiNode.radio.send(transmission.data(), transmission.size());
-  site.runMinutes(1);
+  quietSpell(site, 2);
   endOutage(site);
 
   // Stored once, and dated when the gateway first heard it.
@@ -697,11 +703,11 @@ static void test_a_message_carries_the_time_the_gateway_received_the_packet() {
 
   site.transmit(site.wadiNodeOnAir, reading(300));
   const uint32_t firstReceivedAt = site.wallClock.unixSeconds();
-  site.runMinutes(7);
+  quietSpell(site, 14);
   site.uplink.startOutage();
   site.transmit(site.wadiNodeOnAir, reading(350));
   const uint32_t secondReceivedAt = site.wallClock.unixSeconds();
-  site.runMinutes(10);
+  quietSpell(site, 20);
   endOutage(site);
 
   const std::vector<std::string>& published = site.uplink.published();
@@ -721,7 +727,7 @@ static void test_messages_from_an_uplink_outage_arrive_in_order_once_it_ends() {
   const auto transmit = [&](TestRadio& from, const Packet& packet) {
     sent.push_back(site.transmit(from, packet));
     receivedAt.push_back(site.wallClock.unixSeconds());
-    site.runMinutes(1);
+    quietSpell(site, 2);
   };
 
   transmit(site.wadiNodeOnAir, reading(300, 10));
@@ -753,7 +759,7 @@ static void test_messages_from_an_uplink_outage_arrive_in_order_once_it_ends() {
 static void test_a_flood_during_an_uplink_outage_is_complete_on_the_backend_afterwards() {
   TestSite site;
   floodTo(site, AlertLevel::Watch);
-  site.runMinutes(2);
+  site.runMs(2ull * site.config.wadiNode.mode.stormMeasureIntervalMs);
   const size_t beforeTheOutage = site.uplink.published().size();
   TEST_ASSERT_TRUE(beforeTheOutage >= 1);
 
@@ -856,10 +862,10 @@ static void test_stored_messages_survive_a_gateway_restart() {
   sent.push_back(site.transmit(site.wadiNodeOnAir, alert(AlertLevel::Warning)));
   sent.push_back(site.transmit(site.sirenNodeOnAir, acknowledgement(sent.back())));
   const uint32_t lastReceivedAt = site.wallClock.unixSeconds();
-  site.runMinutes(3);
+  quietSpell(site, 6);
 
   site.restartGateway();
-  site.runMinutes(3);
+  quietSpell(site, 6);
   sent.push_back(site.transmit(site.wadiNodeOnAir, alert(AlertLevel::Evacuate)));
   TEST_ASSERT_EQUAL_UINT(0, site.uplink.published().size());
 
@@ -1103,7 +1109,7 @@ static void test_two_wadi_nodes_refreshing_their_alerts_through_a_long_outage_co
   site.uplink.startOutage();
 
   floodBothWadiNodes(site);
-  site.runMinutes(120);
+  site.runMs(2ull * site.config.wadiNode.heartbeatIntervalMs);
   // Far more than the store holds: an alert, a reading and an acknowledgement a minute
   // for each wadi node.
   const size_t sentDuringTheOutage = site.packetsOnAir().size();
@@ -1130,10 +1136,10 @@ static void test_packets_received_before_the_time_is_known_are_dated_once_it_is(
   std::vector<Packet> sent;
   sent.push_back(site.transmit(site.wadiNodeOnAir, reading(300)));
   const uint32_t firstReceivedAt = site.wallClock.unixSeconds();
-  site.runMinutes(7);
+  quietSpell(site, 14);
   sent.push_back(site.transmit(site.wadiNodeOnAir, alert(AlertLevel::Watch)));
   const uint32_t secondReceivedAt = site.wallClock.unixSeconds();
-  site.runMinutes(3);
+  quietSpell(site, 6);
   // The gateway cannot date them, so it holds them.
   TEST_ASSERT_EQUAL_UINT(0, site.uplink.attempts());
 
@@ -1150,15 +1156,15 @@ static void test_packets_held_undated_through_a_restart_are_dated_at_the_restart
   site.wallClock.forgetTime();
   std::vector<Packet> sent;
   sent.push_back(site.transmit(site.wadiNodeOnAir, reading(300)));
-  site.runMinutes(5);
+  quietSpell(site, 10);
 
   site.restartGateway();
   site.runMs(TestSite::kStepMs);
   const uint32_t restartedAt = site.wallClock.unixSeconds();
-  site.runMinutes(4);
+  quietSpell(site, 8);
   sent.push_back(site.transmit(site.wadiNodeOnAir, alert(AlertLevel::Watch)));
   const uint32_t secondReceivedAt = site.wallClock.unixSeconds();
-  site.runMinutes(2);
+  quietSpell(site, 4);
   site.wallClock.learnTime();
   letTheUplinkCatchUp(site);
 
