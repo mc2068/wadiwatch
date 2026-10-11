@@ -1,9 +1,19 @@
 // ESP32 implementations of the ports shared by every device.
 #pragma once
 
+#include <Arduino.h>
 #include <esp_timer.h>
 
 #include "wadiwatch/ports.h"
+
+// Arduino's random(), which on the ESP32 draws from the hardware random number
+// generator as long as randomSeed() is never called.
+class ArduinoRandom : public wadiwatch::RandomSource {
+ public:
+  uint32_t below(uint32_t bound) override {
+    return static_cast<uint32_t>(random(static_cast<long>(bound)));
+  }
+};
 
 class EspClock : public wadiwatch::Clock {
  public:
@@ -14,5 +24,21 @@ class EspClock : public wadiwatch::Clock {
 class UnconnectedRadio : public wadiwatch::Radio {
  public:
   void send(const uint8_t*, size_t) override {}
+  void setListening(bool) override {}
   size_t receive(uint8_t*, size_t) override { return 0; }
+};
+
+// Stands in for flash storage until its adapter is written: remembers nothing across a restart.
+class UnconnectedStorage : public wadiwatch::PersistentStorage {
+ public:
+  bool load(uint32_t, uint32_t&) override { return false; }
+  void store(uint32_t, uint32_t) override {}
+};
+
+// Stands in for the battery, signal and tamper readings until their adapters are written.
+class UnmeasuredNodeHealth : public wadiwatch::NodeHealth {
+ public:
+  uint16_t batteryMillivolts() override { return 0; }
+  int8_t signalStrengthDbm() override { return 0; }
+  bool tamperDetected() override { return false; }
 };

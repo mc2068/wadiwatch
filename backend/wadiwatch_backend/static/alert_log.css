@@ -1,0 +1,235 @@
+/* Alert log, officer sign-in, the Evacuate acknowledgement request and the all clear.
+   Colours and alert level variables come from dashboard.css. */
+
+/* Sign-in control in the top bar */
+
+.officer { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.officer__name { color: #d5dfe5; }
+
+.officer__button {
+  padding: 5px 12px;
+  border: 1px solid #5b7282;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: transparent;
+  cursor: pointer;
+}
+.officer__button:hover { background: #1d3646; }
+.officer__button:focus-visible,
+.ack-request__button:focus-visible,
+.alert-log__button:focus-visible,
+.sign-in button:focus-visible { outline: 3px solid #7fc4ff; outline-offset: 2px; }
+
+/* The request that stays while an Evacuate alert has no officer acknowledgement */
+
+/* The page scrolls (dashboard.css), so the request sticks to the top of the
+   window to stay on screen. Leaflet's panes go up to z-index 1000. */
+.ack-requests {
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  flex: none;
+  color: #fff;
+  background: var(--evacuate);
+  border-bottom: 3px solid #7d0f20;
+  animation: ack-request-pulse 1.6s ease-in-out infinite;
+}
+.ack-requests[hidden] { display: none; }
+
+.ack-request {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  font-size: 16px;
+}
+.ack-request + .ack-request { border-top: 1px solid rgba(255, 255, 255, 0.35); }
+.ack-request__text b { text-transform: uppercase; letter-spacing: 0.03em; }
+
+.ack-request__button {
+  flex: none;
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--evacuate);
+  background: #fff;
+  cursor: pointer;
+}
+.ack-request__button:hover { background: #ffe9ec; }
+.ack-request__button:disabled { opacity: 0.6; cursor: default; }
+
+@keyframes ack-request-pulse {
+  0%, 100% { background: var(--evacuate); }
+  50% { background: #a3142a; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ack-requests { animation: none; }
+}
+
+/* Alert log: the last section of the page, as long as it needs (the page scrolls). */
+
+.alert-log {
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+}
+
+.alert-log__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 18px 18px 10px;
+}
+.alert-log__head h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+.alert-log__about { font-size: 12px; color: var(--ink-soft); }
+.alert-log__status { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.alert-log__status--lost { color: var(--evacuate); }
+
+.alert-log__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+.alert-log__table th {
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  background: var(--paper);
+}
+
+.alert-log__table td {
+  padding: 7px 18px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.alert-log__time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.alert-log__empty { padding: 14px 18px; color: var(--ink-soft); }
+
+.alert-log__entry { white-space: nowrap; }
+.alert-log__type { display: inline-block; min-width: 62px; font-weight: 600; }
+.alert-log__row--test .alert-log__type,
+.alert-log__row--all_clear .alert-log__type { color: var(--ink-soft); }
+
+.alert-log__level {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--silent);
+}
+.alert-log__level.level--watch { background: var(--watch); color: var(--ink); }
+.alert-log__level.level--warning { background: var(--warning); }
+.alert-log__level.level--evacuate { background: var(--evacuate); }
+
+.alert-log__in-force {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+}
+
+.alert-log__sirens { margin: 0; padding: 0; list-style: none; }
+.alert-log__siren--yes { color: #1d6b33; }
+.alert-log__siren--no { font-weight: 700; color: var(--evacuate); }
+.alert-log__siren--quiet,
+.alert-log__quiet { color: var(--ink-soft); }
+.alert-log__needed { font-weight: 700; color: var(--evacuate); }
+
+.alert-log__button {
+  padding: 3px 12px;
+  border: 1px solid var(--bar);
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  background: var(--bar);
+  cursor: pointer;
+}
+.alert-log__button:hover { background: #1d3646; }
+.alert-log__button:disabled { opacity: 0.6; cursor: default; }
+
+/* The all clear: beside the alert in force it would end */
+
+.all-clear {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  max-width: 46ch;
+}
+.all-clear__button { background: #1d6b33; border-color: #1d6b33; }
+.all-clear__button:hover { background: #17552a; }
+.all-clear__button:disabled { background: var(--silent); border-color: var(--silent); opacity: 1; }
+.all-clear__refusal { font-size: 12px; color: var(--ink-soft); }
+.all-clear__sent { font-weight: 600; }
+
+/* Sign-in dialog, and the question asked before an all clear */
+
+.sign-in {
+  width: min(360px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.sign-in::backdrop { background: rgba(16, 34, 46, 0.55); }
+
+.sign-in__form { display: flex; flex-direction: column; gap: 6px; padding: 20px; }
+.sign-in__form h2 { font-size: 17px; }
+.sign-in__note { margin-bottom: 8px; font-size: 13px; color: var(--ink-soft); }
+.sign-in__form label { margin-top: 4px; font-size: 13px; font-weight: 600; }
+
+.sign-in__form input {
+  padding: 8px 10px;
+  border: 1px solid #9aa7b0;
+  border-radius: 4px;
+  font: inherit;
+}
+.sign-in__form input:focus-visible { outline: 3px solid #7fc4ff; outline-offset: 1px; }
+
+.sign-in__error { margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--evacuate); }
+.sign-in__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+.sign-in__cancel,
+.sign-in__submit {
+  padding: 7px 16px;
+  border: 1px solid var(--bar);
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sign-in__cancel { color: var(--bar); background: var(--card); }
+.sign-in__submit { color: #fff; background: var(--bar); }
+.sign-in__submit:disabled { opacity: 0.6; cursor: default; }
+
+@media (max-width: 800px) {
+  .ack-request { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .alert-log__table thead { display: none; }
+  .alert-log__table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .alert-log__table td { display: block; padding: 2px 18px; border: 0; }
+  .alert-log__entry { white-space: normal; }
+}

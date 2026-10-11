@@ -1,2 +1,5 @@
 .pio/
 .vscode/
+# A real site key, and a real command key, stay on the machine that flashes the
+# devices (see site_config.cpp and command_key.cpp).
+lib/wadiwatch/src/wadiwatch/site_key_local.h

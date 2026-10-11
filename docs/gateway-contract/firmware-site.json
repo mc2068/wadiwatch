@@ -1,0 +1,15 @@
+{
+  "gateway": 769,
+  "siren_nodes": [513],
+  "wadis": [
+    {"id": 1, "wadi_nodes": [257, 258]}
+  ],
+  "wadi_nodes": [
+    {"id": 257, "wadi": 1, "upstream": null, "watch_level_cm": 60.0},
+    {"id": 258, "wadi": 1, "upstream": 257, "watch_level_cm": 60.0}
+  ],
+  "heartbeat_interval_s": 3600,
+  "dry_mode_interval_s": 900,
+  "alert_refresh_interval_s": 60,
+  "all_clear_command_valid_s": 120
+}

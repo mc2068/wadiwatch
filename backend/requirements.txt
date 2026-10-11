@@ -1,0 +1,4 @@
+# Runtime dependencies of the WadiWatch backend.
+fastapi>=0.143,<1
+uvicorn>=0.54,<1
+paho-mqtt>=2.1,<3

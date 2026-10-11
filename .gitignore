@@ -2,3 +2,9 @@ node_modules/
 __pycache__/
 report/build/out/
 *.tmp
+.claude/worktrees/
+.venv/
+.pytest_cache/
+backend/data/
+# Local credentials (officer test accounts written by the backend seed step)
+*.local.json

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WadiWatch dashboard</title>
+  <!-- Leaflet is the only outside dependency. Without it the node list still works. -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="static/dashboard.css">
+  <link rel="stylesheet" href="static/health.css">
+  <link rel="stylesheet" href="static/alert_log.css">
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script defer src="static/dashboard.js"></script>
+  <script defer src="static/health.js"></script>
+  <script defer src="static/alert_log.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="bar__title">
+      <h1>WadiWatch</h1>
+      <p id="site-name">Loading the site</p>
+    </div>
+    <p id="summary" class="summary summary--unknown" role="status" aria-live="polite">Waiting for data</p>
+    <p id="connection" class="connection" role="status">Connecting</p>
+    <!-- Officer sign-in (alert_log.js) -->
+    <div class="officer">
+      <span id="officer-name" class="officer__name" hidden></span>
+      <button id="sign-in-open" type="button" class="officer__button">Officer sign-in</button>
+      <button id="sign-out" type="button" class="officer__button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <!-- Stays on screen while an Evacuate alert has no officer acknowledgement (alert_log.js) -->
+  <div id="acknowledgement-requests" class="ack-requests" role="alert" hidden></div>
+
+  <!-- Age of the gateway's latest data. Turns into the stale-data warning. (health.js) -->
+  <div id="gateway-status" class="gateway-status gateway-status--waiting">
+    <p id="gateway-announcement" class="gateway-status__announcement" role="status" aria-live="assertive"></p>
+    <p class="gateway-status__age">
+      <strong id="gateway-status-title" class="gateway-status__title" hidden></strong>
+      <span id="gateway-status-text">Checking the gateway</span>
+    </p>
+    <ul id="health-flags" class="health-flags" aria-label="Nodes that need attention"></ul>
+  </div>
+
+  <main class="layout">
+    <section class="map" aria-label="Map of nodes coloured by alert level">
+      <div id="map"></div>
+      <p id="placeholder-note" class="map__note" hidden>
+        Node positions are placeholders, not surveyed locations.
+      </p>
+    </section>
+
+    <aside class="panel" aria-label="Nodes">
+      <h2>Nodes</h2>
+      <ul id="node-list" class="nodes"></ul>
+
+      <h2>Alert levels</h2>
+      <ul class="legend">
+        <li><span class="swatch level--none"></span>No alert</li>
+        <li><span class="swatch level--watch"></span>Watch</li>
+        <li><span class="swatch level--warning"></span>Warning</li>
+        <li><span class="swatch level--evacuate"></span>Evacuate</li>
+        <li><span class="swatch level--silent"></span>Never heard from</li>
+      </ul>
+      <ul class="legend legend--shapes">
+        <li><span class="pin pin--wadi_node level--plain"></span>Wadi node</li>
+        <li><span class="pin pin--siren_node level--plain"></span>Siren node</li>
+        <li><span class="pin pin--gateway"></span>Gateway</li>
+      </ul>
+    </aside>
+  </main>
+
+  <!-- Curves and node health. (health.js) -->
+  <section class="detail" aria-labelledby="curves-title">
+    <div class="detail__head">
+      <h2 id="curves-title">Water level and rate of rise</h2>
+      <div id="curve-periods" class="periods" role="group" aria-label="Period shown"></div>
+    </div>
+    <div id="curves" class="curves"></div>
+  </section>
+
+  <section id="health" class="detail" aria-labelledby="health-title">
+    <div class="detail__head">
+      <h2 id="health-title">Node health</h2>
+      <p id="health-rule" class="detail__note"></p>
+    </div>
+    <table class="health">
+      <thead>
+        <tr>
+          <th scope="col">Node</th>
+          <th scope="col">Status</th>
+          <th scope="col">Battery</th>
+          <th scope="col">Signal</th>
+          <th scope="col">Tamper switch</th>
+          <th scope="col">Discarded readings</th>
+          <th scope="col">Last heartbeat</th>
+        </tr>
+      </thead>
+      <tbody id="health-rows"></tbody>
+    </table>
+  </section>
+
+  <!-- Alert log, sign-in, acknowledgement and the all clear: alert_log.js and alert_log.css -->
+  <section id="alert-log" class="alert-log" aria-labelledby="alert-log-title">
+    <div class="alert-log__head">
+      <h2 id="alert-log-title">Alert log</h2>
+      <p class="alert-log__about">Every alert, test and all clear. Open to everyone; officers sign in to acknowledge an alert and to issue the all clear.</p>
+      <p id="alert-log-status" class="alert-log__status" role="status"></p>
+    </div>
+    <table class="alert-log__table">
+      <thead>
+        <tr>
+          <th scope="col">Time</th>
+          <th scope="col">Entry</th>
+          <th scope="col">Node</th>
+          <th scope="col">Siren nodes</th>
+          <th scope="col">Officer</th>
+        </tr>
+      </thead>
+      <tbody id="alert-log-entries">
+        <tr><td colspan="5" class="alert-log__empty">Loading the alert log</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <dialog id="sign-in" class="sign-in" aria-labelledby="sign-in-title">
+    <form id="sign-in-form" class="sign-in__form" method="dialog">
+      <h2 id="sign-in-title">Officer sign-in</h2>
+      <p id="sign-in-note" class="sign-in__note">Sign in to acknowledge alerts and to issue the all clear.</p>
+      <label for="sign-in-name">Account name</label>
+      <input id="sign-in-name" name="name" type="text" required maxlength="32"
+             autocomplete="username" autocapitalize="none" spellcheck="false">
+      <label for="sign-in-password">Password</label>
+      <input id="sign-in-password" name="password" type="password" required maxlength="128"
+             autocomplete="current-password">
+      <p id="sign-in-error" class="sign-in__error" role="alert" hidden></p>
+      <div class="sign-in__actions">
+        <button id="sign-in-cancel" type="button" class="sign-in__cancel">Cancel</button>
+        <button id="sign-in-submit" type="submit" class="sign-in__submit">Sign in</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Asked before an all clear is issued: it cannot be taken back. -->
+  <dialog id="all-clear-confirm" class="sign-in" aria-labelledby="all-clear-question">
+    <form id="all-clear-form" class="sign-in__form" method="dialog">
+      <h2 id="all-clear-question">Issue the all clear?</h2>
+      <p class="sign-in__note">
+        The sirens stop, the wadi nodes of this wadi drop their alert, and everyone who
+        received an alert for this event gets a closing SMS. It cannot be taken back.
+      </p>
+      <div class="sign-in__actions">
+        <button id="all-clear-cancel" type="button" class="sign-in__cancel">Cancel</button>
+        <button id="all-clear-submit" type="submit" class="sign-in__submit">Issue the all clear</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

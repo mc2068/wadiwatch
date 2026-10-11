@@ -1,0 +1,165 @@
+"""The replay tool feeds the recorded flood scenario through the HTTP ingest endpoint,
+which the backend serves only when it is started for a local replay."""
+
+import io
+import json
+import urllib.error
+
+import pytest
+
+from wadiwatch_backend import replay as replay_tool
+from wadiwatch_backend.replay import (
+    DEFAULT_SCENARIO,
+    IngestSwitchedOff,
+    http_sender,
+    left_open,
+    load_scenario,
+    replay,
+)
+
+
+@pytest.fixture
+def scenario():
+    return load_scenario(DEFAULT_SCENARIO)
+
+
+@pytest.fixture(autouse=True)
+def backend_started_for_a_replay(ingest_over_http):
+    """Every scenario here replays into a backend whose HTTP ingest is switched on."""
+
+
+class Recorder:
+    """Sends through the HTTP endpoint and notes what the map shows after each message."""
+
+    def __init__(self, harness):
+        self.harness = harness
+        self.sent = []
+        self.levels_shown = {node_id: ["none"] for node_id in harness.nodes()}
+
+    def __call__(self, payload):
+        self.sent.append(json.loads(payload))
+        response = self.harness.client.post("/api/ingest", content=payload)
+        for node_id, node in self.harness.nodes().items():
+            if self.levels_shown[node_id][-1] != node["alert_level"]:
+                self.levels_shown[node_id].append(node["alert_level"])
+        return response.json()["status"]
+
+
+def test_flood_scenario_takes_the_map_through_a_whole_event(
+    harness, scenario, clock, upstream, downstream, siren
+):
+    send = Recorder(harness)
+
+    summary = replay(scenario, send, instant=True, clock=clock)
+
+    assert summary.stored == len(scenario)
+    assert summary.rejected == 0
+    assert summary.duplicate == 0
+    assert send.levels_shown[upstream.id] == ["none", "watch", "warning", "none"]
+    # Warning here, confirmed by Warning upstream, becomes Evacuate.
+    assert send.levels_shown[downstream.id] == ["none", "watch", "warning", "evacuate", "none"]
+    assert send.levels_shown[siren.id] == ["none", "warning", "evacuate", "none"]
+
+
+def test_flood_scenario_uses_every_message_kind_and_only_configured_nodes(scenario, site):
+    assert {message["kind"] for message in scenario} == {
+        "reading",
+        "alert",
+        "acknowledgement",
+        "heartbeat",
+        "all_clear",
+        "test",
+    }
+    configured = {node.id for node in site.nodes} | {site.gateway.id}
+    assert {message["node"] for message in scenario} <= configured
+
+
+def test_a_scenario_left_open_ends_with_its_alerts_in_force_for_an_officer_to_end(
+    harness, signed_in, scenario, clock, wadi, upstream, downstream
+):
+    send = Recorder(harness)
+
+    summary = replay(left_open(scenario), send, instant=True, clock=clock)
+
+    assert summary.rejected == 0
+    assert summary.stored == len(scenario) - 2
+    assert "all_clear" not in {message["kind"] for message in send.sent}
+    assert send.levels_shown[upstream.id][-1] == "warning"
+    assert send.levels_shown[downstream.id][-1] == "evacuate"
+    # The flood of the scenario has passed, so the all clear is there to be issued.
+    response = signed_in.issue_all_clear(wadi.id)
+    assert response.status_code == 200, response.text
+    assert harness.gateway.commands[0]["wadi"] == wadi.id
+
+
+def test_instant_replay_ends_now_and_keeps_the_recorded_spacing(harness, scenario, clock):
+    send = Recorder(harness)
+
+    replay(scenario, send, instant=True, clock=clock)
+
+    recorded = [message["ts"] for message in scenario]
+    replayed = [message["ts"] for message in send.sent]
+    assert replayed[-1] == int(clock())
+    assert [ts - replayed[0] for ts in replayed] == [ts - recorded[0] for ts in recorded]
+
+
+def test_timed_replay_is_compressed_and_stamps_each_message_when_it_is_sent(
+    harness, scenario, clock
+):
+    send = Recorder(harness)
+    started = clock()
+    speed = 120.0
+    stamped_at = []
+
+    def send_and_note_time(payload):
+        stamped_at.append(int(clock()))
+        return send(payload)
+
+    replay(scenario, send_and_note_time, speed=speed, clock=clock, sleep=clock.advance)
+
+    duration = scenario[-1]["ts"] - scenario[0]["ts"]
+    assert clock() - started == pytest.approx(duration / speed)
+    assert [message["ts"] for message in send.sent] == stamped_at
+
+
+def test_replaying_twice_adds_a_second_event_instead_of_duplicates(harness, scenario, clock):
+    send = Recorder(harness)
+    replay(scenario, send, instant=True, clock=clock)
+    clock.advance(86400)
+
+    summary = replay(scenario, send, instant=True, clock=clock)
+
+    assert summary.stored == len(scenario)
+    assert summary.duplicate == 0
+
+
+# A backend that was not started for a replay
+
+
+def refusing(status):
+    """A stand-in for urllib's urlopen: the backend answers every request with `status`."""
+
+    def urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, status, "refused", {}, io.BytesIO(b"{}"))
+
+    return urlopen
+
+
+@pytest.mark.parametrize("status", [404, 405])
+def test_the_replay_tool_says_when_the_backend_does_not_serve_http_ingest(
+    monkeypatch, capsys, status
+):
+    monkeypatch.setattr(replay_tool.urllib.request, "urlopen", refusing(status))
+
+    with pytest.raises(IngestSwitchedOff):
+        http_sender("http://127.0.0.1:8000")("{}")
+    exit_code = replay_tool.main(["--instant"])
+
+    assert exit_code == 1
+    assert "WADIWATCH_HTTP_INGEST=1" in capsys.readouterr().err
+
+
+def test_the_replay_tool_still_counts_a_message_the_backend_rejects(monkeypatch):
+    monkeypatch.setattr(replay_tool.urllib.request, "urlopen", refusing(400))
+
+    assert http_sender("http://127.0.0.1:8000")("{}") == "rejected"
