@@ -28,6 +28,8 @@ WadiWatch is a low-cost, low-power flash-flood early-warning system for the wadi
 | **Receive window** | The short time after each storm-mode measurement in which a wadi node with an upstream node keeps its receiver on to hear it. |
 | **Answer window** | The short time after each packet it transmits in which a wadi node that holds an alert level keeps its receiver on. The gateway answers in it with the all clear. |
 | **Heartbeat** | Periodic status packet (battery, signal, last reading) that proves a node is alive. |
+| **Repeated level** | A level a wadi node sends again because its latest measurement gave none. It proves the node is alive and says nothing about the water: it is never evidence for the all clear. |
+| **Command key** | The secret shared by the backend and the gateway, and by nobody else, with which the backend signs the all clear command. Not the site key that signs radio packets, which every node holds. |
 | **Registered recipient** | A resident, farmer or official who has consented to receive SMS alerts. |
 | **Wadi committee** | Local group (residents, municipality, Civil Protection) that owns thresholds, siren locations and the recipient list. |
 | **Pilot** | First real deployment on one wadi in Nabeul: 4 wadi nodes, 3 siren nodes, 1 gateway. |
