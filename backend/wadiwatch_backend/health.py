@@ -8,6 +8,10 @@ Two questions with two clocks:
 - The data is stale when the gateway itself has gone silent. That is judged on
   the time the backend received its latest message (`received_at`), whatever
   the message says about when it was measured.
+
+How long a silence is still normal follows from what the wadi nodes send
+(`report_interval_s`): the more a node has to say, the sooner its silence means
+something.
 """
 
 from .contract import ALERT_LEVELS
@@ -17,6 +21,24 @@ MISSED_INTERVALS = 2
 
 # A wadi node at one of these alert levels repeats its alert every refresh interval.
 REFRESHED_ALERT_LEVELS = ALERT_LEVELS[ALERT_LEVELS.index("warning") :]
+
+
+def report_interval_s(site, alert_level):
+    """How often, at the least, a wadi node at this alert level is heard from.
+
+    - At Warning or Evacuate it sends its alert refresh, with its level, every
+      alert refresh interval.
+    - At Watch it has no alert refresh and may be back in dry mode, but a node
+      that holds an alert level sends a reading with every measurement: every
+      dry-mode interval at the least.
+    - With no alert level it may be in dry mode, where it sends nothing but its
+      heartbeat, which carries its last level.
+    """
+    if alert_level in REFRESHED_ALERT_LEVELS:
+        return site.alert_refresh_interval_s
+    if alert_level != "none":
+        return site.dry_mode_interval_s
+    return site.heartbeat_interval_s
 
 # What a heartbeat says about the node, as shown in its health. The last two
 # are optional in the contract: a wadi node counts discards, a siren node
@@ -61,10 +83,13 @@ def _node(reader, node, now, faulty_after_s, heard_since):
 
 
 def _gateway(reader, site, now, wadi_alert_levels):
-    if any(level in REFRESHED_ALERT_LEVELS for level in wadi_alert_levels):
-        expected_interval_s = site.alert_refresh_interval_s
-    else:
-        expected_interval_s = site.dry_mode_interval_s
+    # The gateway forwards what it hears, so it is heard from as often as the wadi
+    # node with the most to say: every heartbeat interval on a dry day, when the
+    # nodes send nothing but their heartbeats.
+    expected_interval_s = min(
+        [report_interval_s(site, level) for level in wadi_alert_levels]
+        + [site.heartbeat_interval_s]
+    )
     stale_after_s = MISSED_INTERVALS * expected_interval_s
     last_received_at = reader.last_received_at()
     return {

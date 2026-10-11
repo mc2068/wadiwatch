@@ -71,7 +71,7 @@ Fields are required unless marked optional.
 | `level_cm` | number, 0 to 10000 | Water level above the wadi bed, in centimetres. |
 | `rise_cm_min` | number, -1000 to 1000 | Rate of rise in centimetres per minute. Negative while the level falls. |
 | `rain_mm` | number, 0 to 10000, optional | Rain over the node's rainfall window (30 minutes on the prototype site), in millimetres. |
-| `storm_mode` | boolean, optional | The node is in storm mode (`true`) or dry mode (`false`). |
+| `storm_mode` | boolean, optional | The node is in storm mode (`true`) or dry mode (`false`). A node sends a reading with every measurement in storm mode, and in dry mode while it holds an alert level. |
 | `alert_level` | string, optional | The alert level the node held when it measured: `none`, `watch`, `warning` or `evacuate`. For display beside the reading only: it never changes the alert level the backend shows. |
 | `level_repeated` | boolean, optional | `true` when the node's latest measurement gave no usable level, so that `level_cm` repeats the last level it did measure (0 if it has measured none) and says nothing about the wadi now. `false` for a level just measured. See "Repeated levels" below. |
 

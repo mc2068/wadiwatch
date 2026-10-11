@@ -111,7 +111,8 @@ struct GatewayConfig {
   // A wadi node that held an alert level when the all clear was issued is given the
   // all clear again whenever it shows it has not heard, for this long after the
   // command. After that its alert counts as a new event. Must be longer than the
-  // heartbeat interval: a node at Watch in dry mode sends nothing else.
+  // heartbeat interval, so that a node is given the all clear again on a heartbeat
+  // at least (a node at Watch in dry mode sends a reading with each measurement).
   uint32_t allClearAnswerPeriodMs;
   // And this many times at most for one command.
   uint8_t allClearMaxAnswers;

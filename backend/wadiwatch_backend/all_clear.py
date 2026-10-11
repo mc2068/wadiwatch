@@ -10,13 +10,15 @@ site).
 - The gateway's data must be current. If the gateway has gone silent (the
   stale-data rule of health.py), nothing here says how the wadi is now, and
   the all clear is refused whatever the last levels were.
-- Every wadi node must have reported a level, and recently enough. A node at
-  Warning or above measures and reports every minute, so two missed alert
-  refresh intervals make it silent. Any other node may be in dry mode, where
-  it reports its level only in its hourly heartbeat, so it is silent after two
-  missed heartbeat intervals. A wadi node in dry mode is one that has found
-  its level below the Watch threshold: it goes to storm mode, and reports, as
-  soon as it does not.
+- Every wadi node must have reported a level, and recently enough
+  (health.report_interval_s). A node at Warning or above measures and reports
+  every minute, so two missed alert refresh intervals make it silent. A node
+  at Watch reports every measurement, in dry mode too, so it is silent after
+  two missed dry-mode intervals. A node with no alert level may be in dry
+  mode, where it reports its level only in its hourly heartbeat, so it is
+  silent after two missed heartbeat intervals. A wadi node in dry mode is one
+  that has found its level below the Watch threshold: it goes to storm mode,
+  and reports, as soon as it does not.
 - A level must have been measured. A wadi node whose sensor gives no usable
   reading keeps the last level it measured and goes on sending it, in every
   alert refresh and heartbeat, marked as repeated (`level_repeated`). Such a
@@ -32,7 +34,7 @@ A level is whatever a wadi node reported: in a reading, behind an alert, or in
 a heartbeat.
 """
 
-from .health import MISSED_INTERVALS, REFRESHED_ALERT_LEVELS
+from .health import MISSED_INTERVALS, report_interval_s
 
 # Why a wadi node stands in the way of the all clear.
 NO_LEVEL = "no_level"
@@ -120,11 +122,7 @@ def _judge_node(reader, site, node, now, alert_level):
         return judged
 
     level_ts, level_cm, measured = latest
-    if alert_level in REFRESHED_ALERT_LEVELS:
-        expected_interval_s = site.alert_refresh_interval_s
-    else:
-        expected_interval_s = site.heartbeat_interval_s
-    if now - level_ts > MISSED_INTERVALS * expected_interval_s:
+    if now - level_ts > MISSED_INTERVALS * report_interval_s(site, alert_level):
         judged["reason"] = SILENT
         judged["refusal"] = (
             f"{node.name} last reported its level {_duration(now - level_ts)} ago, "

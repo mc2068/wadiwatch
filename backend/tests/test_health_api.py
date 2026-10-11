@@ -334,25 +334,40 @@ def test_age_keeps_counting_across_a_restart(harness, clock, upstream):
 # Stale data
 
 
-def test_data_is_stale_once_the_gateway_is_silent_for_more_than_two_dry_mode_intervals(
+def test_on_a_dry_day_data_is_stale_once_the_gateway_is_silent_for_more_than_two_heartbeat_intervals(
     harness, site, clock, upstream
 ):
-    harness.ingest("reading", upstream.id, level_cm=10.0, rise_cm_min=0.0)
+    # With no alert level anywhere the nodes are in dry mode, where a node sends
+    # nothing but its heartbeat.
+    heartbeat(harness, upstream)
     assert gateway(harness)["stale"] is False
 
-    clock.advance(TWO_INTERVALS * site.dry_mode_interval_s)
+    clock.advance(TWO_INTERVALS * site.heartbeat_interval_s)
     assert gateway(harness)["stale"] is False
 
     clock.advance(1)
     assert gateway(harness)["stale"] is True
-    assert gateway(harness)["stale_after_s"] == TWO_INTERVALS * site.dry_mode_interval_s
+    assert gateway(harness)["stale_after_s"] == TWO_INTERVALS * site.heartbeat_interval_s
+
+
+def test_on_a_dry_day_the_heartbeats_alone_keep_the_data_current(harness, site, clock):
+    # Every node sends its heartbeat once per interval and nothing else, the nodes a
+    # few minutes apart. The picture is looked at every dry-mode interval.
+    looks_per_heartbeat = site.heartbeat_interval_s // site.dry_mode_interval_s
+    for look in range(6 * looks_per_heartbeat):
+        if look % looks_per_heartbeat == 0:
+            for node in site.nodes:
+                heartbeat(harness, node)
+        clock.advance(site.dry_mode_interval_s)
+
+        assert gateway(harness)["stale"] is False, look
 
 
 def test_stale_data_is_fresh_again_when_the_gateway_delivers_a_message(
     harness, site, clock, upstream
 ):
     harness.ingest("reading", upstream.id, level_cm=10.0, rise_cm_min=0.0)
-    clock.advance(TWO_INTERVALS * site.dry_mode_interval_s + 1)
+    clock.advance(TWO_INTERVALS * site.heartbeat_interval_s + 1)
     assert gateway(harness)["stale"] is True
 
     harness.ingest("reading", upstream.id, level_cm=10.0, rise_cm_min=0.0)
@@ -377,23 +392,30 @@ def test_during_a_warning_or_evacuate_two_missed_alert_refreshes_make_the_data_s
     assert gateway(harness)["stale_after_s"] == TWO_INTERVALS * site.alert_refresh_interval_s
 
 
-def test_a_watch_does_not_shorten_the_silence_that_makes_data_stale(
+def test_while_a_wadi_node_is_at_watch_two_missed_dry_mode_measurements_make_the_data_stale(
     harness, site, clock, upstream
 ):
-    # A node at Watch sends no refresh, and may be back in dry mode before the all clear.
+    # A node at Watch has no alert refresh, and may be back in dry mode before the all
+    # clear. While it holds an alert level it reports every measurement it takes.
     harness.ingest("alert", upstream.id, alert_level="watch")
 
     clock.advance(TWO_INTERVALS * site.alert_refresh_interval_s + 1)
-
     assert gateway(harness)["stale"] is False
 
+    clock.advance(TWO_INTERVALS * site.dry_mode_interval_s - TWO_INTERVALS * site.alert_refresh_interval_s - 1)
+    assert gateway(harness)["stale"] is False
 
-def test_after_the_all_clear_the_dry_mode_silence_applies_again(harness, site, clock, upstream):
+    clock.advance(1)
+    assert gateway(harness)["stale"] is True
+    assert gateway(harness)["stale_after_s"] == TWO_INTERVALS * site.dry_mode_interval_s
+
+
+def test_after_the_all_clear_the_silence_of_a_dry_day_applies_again(harness, site, clock, upstream):
     harness.ingest("alert", upstream.id, alert_level="evacuate")
     clock.advance(site.alert_refresh_interval_s)
     harness.ingest("all_clear", site.gateway.id, wadi_node=upstream.id)
 
-    clock.advance(TWO_INTERVALS * site.alert_refresh_interval_s + 1)
+    clock.advance(TWO_INTERVALS * site.dry_mode_interval_s + 1)
 
     assert gateway(harness)["stale"] is False
-    assert gateway(harness)["stale_after_s"] == TWO_INTERVALS * site.dry_mode_interval_s
+    assert gateway(harness)["stale_after_s"] == TWO_INTERVALS * site.heartbeat_interval_s

@@ -815,22 +815,45 @@ static void test_the_gateway_s_airtime_stays_under_the_duty_cycle_limit_even_whe
                          site.gatewayRadio.sent().size());
 }
 
-static void test_a_wadi_node_at_watch_in_dry_mode_hears_the_all_clear_after_its_heartbeat() {
+// The backend judges an all clear on levels measured recently, and the gateway reaches
+// a wadi node only after a packet of its own. So a node that holds an alert level
+// goes on reporting what it measures when it is back in dry mode.
+static void test_a_wadi_node_at_watch_in_dry_mode_sends_a_reading_with_every_measurement() {
   TestSite site;
   const Node node = upstreamNode(site);
   floodTo(site, node, AlertLevel::Watch);
   waterRecedes(site);
   // Watch does not hold the node in storm mode: after the quiet period it measures
-  // every fifteen minutes and sends nothing but its hourly heartbeat.
+  // at the dry-mode interval.
+  site.runMs(node.config.mode.stormQuietMs + 2 * node.config.mode.dryMeasureIntervalMs);
+  const size_t readingsBefore = readingsFrom(site, node).size();
+
+  const uint64_t intervals = 4;
+  const size_t measurements =
+      measurementsWithin(site, node, intervals * node.config.mode.dryMeasureIntervalMs);
+
+  TEST_ASSERT_EQUAL_UINT(intervals, measurements);
+  TEST_ASSERT_EQUAL_UINT(readingsBefore + measurements, readingsFrom(site, node).size());
+  const Packet latest = readingsFrom(site, node).back();
+  TEST_ASSERT_FALSE(latest.reading.stormMode);
+  ASSERT_ALERT_LEVEL(AlertLevel::Watch, latest.reading.alertLevel);
+}
+
+static void test_a_wadi_node_at_watch_in_dry_mode_hears_the_all_clear_after_its_next_reading() {
+  TestSite site;
+  const Node node = upstreamNode(site);
+  floodTo(site, node, AlertLevel::Watch);
+  waterRecedes(site);
   site.runMs(node.config.mode.stormQuietMs + 2 * node.config.mode.dryMeasureIntervalMs);
   ASSERT_ALERT_LEVEL(AlertLevel::Watch, readingsFrom(site, node).back().reading.alertLevel);
   const size_t readingsBefore = readingsFrom(site, node).size();
 
   site.issueAllClear();
-  site.runMs(node.config.heartbeatIntervalMs + site.allClearSettleMs());
+  site.runMs(node.config.mode.dryMeasureIntervalMs + site.allClearSettleMs());
 
-  // The gateway answered the heartbeat, and the node said that it holds no alert level.
-  TEST_ASSERT_EQUAL_UINT(readingsBefore + 1, readingsFrom(site, node).size());
+  // The gateway answered the reading of the node's next measurement, and the node said
+  // in a further reading that it holds no alert level.
+  TEST_ASSERT_EQUAL_UINT(readingsBefore + 2, readingsFrom(site, node).size());
   ASSERT_ALERT_LEVEL(AlertLevel::None, readingsFrom(site, node).back().reading.alertLevel);
 
   // So the next rise to Watch is announced, which a node still at Watch would not do.
@@ -1271,7 +1294,8 @@ int main(int, char**) {
   RUN_TEST(test_an_alert_refresh_above_the_alert_level_the_all_clear_ended_starts_a_new_event);
   RUN_TEST(test_a_gateway_restarted_during_the_event_answers_the_alert_refresh_it_hears_while_holding_the_all_clear);
   RUN_TEST(test_the_gateway_s_airtime_stays_under_the_duty_cycle_limit_even_when_no_wadi_node_hears);
-  RUN_TEST(test_a_wadi_node_at_watch_in_dry_mode_hears_the_all_clear_after_its_heartbeat);
+  RUN_TEST(test_a_wadi_node_at_watch_in_dry_mode_sends_a_reading_with_every_measurement);
+  RUN_TEST(test_a_wadi_node_at_watch_in_dry_mode_hears_the_all_clear_after_its_next_reading);
   RUN_TEST(test_a_wadi_node_with_no_alert_never_switches_its_receiver_on);
   RUN_TEST(test_a_wadi_node_in_alert_listens_only_for_the_answer_window_after_each_transmission);
   RUN_TEST(test_a_closing_sms_goes_once_to_every_recipient_who_received_an_alert_for_the_event);

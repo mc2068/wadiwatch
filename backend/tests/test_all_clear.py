@@ -350,6 +350,27 @@ def test_a_wadi_node_not_in_alert_is_silent_after_two_heartbeat_intervals_withou
     assert refusal_of(response, upstream) is None
 
 
+def test_a_wadi_node_at_watch_is_silent_after_two_dry_mode_intervals_without_a_level(
+    harness, signed_in, clock, site, wadi, upstream, downstream
+):
+    flood_that_has_passed(harness, clock, site, upstream, downstream, alert_level="watch")
+    # A node that holds an alert level reports every measurement, in dry mode too:
+    # every dry-mode interval at the least. The upstream node, at Watch, has not for
+    # two of them, while the downstream node goes on reporting.
+    stay(harness, clock, {downstream: LOW_CM}, 2 * site.dry_mode_interval_s)
+    in_time = wadi_verdict(signed_in, wadi)
+    stay(harness, clock, {downstream: LOW_CM}, MINUTE)
+
+    response = signed_in.issue_all_clear(wadi.id)
+
+    assert in_time["allowed"] is True
+    assert response.status_code == 409
+    assert refusal_of(response, upstream) == "silent"
+    assert refusal_of(response, downstream) is None
+    assert upstream.name in response.json()["error"]
+    assert harness.gateway.commands == []
+
+
 def test_an_all_clear_is_refused_for_a_wadi_node_that_has_never_reported_a_level(
     harness, signed_in, clock, site, wadi, upstream, downstream
 ):

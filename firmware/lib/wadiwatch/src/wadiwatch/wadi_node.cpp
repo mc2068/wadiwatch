@@ -159,6 +159,10 @@ void WadiNode::measure(uint64_t nowMs) {
     readingDue_ = true;
   } else {
     rise_.clear();
+    // A node that holds an alert level reports its dry-mode measurements too: the
+    // all clear is judged on levels measured recently, and the gateway can reach
+    // this node only after a packet of its own. On a dry day nothing is sent.
+    if (alertLevel_ != AlertLevel::None) readingDue_ = true;
   }
 }
 

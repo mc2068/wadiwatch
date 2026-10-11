@@ -312,9 +312,10 @@ bool Gateway::handleAwaitedPacket(WadiNodeAllClear& allClear, const Packet& pack
     return false;
   }
 
-  // A node at Warning or above asks with the alert it sends again every minute; its
+  // A node at Warning or above asks with its alert refresh every minute; its
   // readings are left unanswered, to keep the gateway off the air. A node at Watch
-  // sends no alert again, so its readings ask, and in dry mode its heartbeat.
+  // has no alert refresh, so its readings ask (it sends one with every measurement
+  // while it holds an alert level, in dry mode too), and any node's heartbeat.
   const bool asks =
       packet.kind == PacketKind::Alert || packet.kind == PacketKind::Heartbeat ||
       (packet.kind == PacketKind::Reading && packet.reading.alertLevel == AlertLevel::Watch);

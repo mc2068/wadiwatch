@@ -63,8 +63,9 @@ class Site:
     wadis: tuple
     # How often every node sends a heartbeat. Node health is judged against it.
     heartbeat_interval_s: int
-    # How often a wadi node measures in dry mode: the longest gap between two
-    # gateway messages while nothing is happening.
+    # How often a wadi node measures in dry mode. A node that holds an alert
+    # level reports each of those measurements; one that holds none sends only
+    # its heartbeat.
     dry_mode_interval_s: int
     # How often a wadi node at Warning or above repeats its alert.
     alert_refresh_interval_s: int
