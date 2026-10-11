@@ -1,10 +1,10 @@
 #include "wadiwatch/uplink_message.h"
 
+#include "wadiwatch/gateway_contract.h"
+
 namespace wadiwatch {
 
 namespace {
-
-constexpr uint32_t kContractVersion = 1;
 
 // Writes one flat JSON object into a fixed buffer, field by field. Names and
 // text values are the fixed words of the contract, so nothing needs escaping.

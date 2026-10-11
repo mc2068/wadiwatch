@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "wadiwatch/byte_order.h"
+
 namespace wadiwatch {
 
 namespace {
@@ -38,22 +40,6 @@ constexpr uint8_t kHeartbeat = 1;
 constexpr uint8_t kAcknowledgementOrTest = 2;
 constexpr uint8_t kAlertNothingNew = 3;
 constexpr uint8_t kAlertLevelChange = 4;
-
-void put16(uint8_t* at, uint16_t value) {
-  at[0] = static_cast<uint8_t>(value >> 8);
-  at[1] = static_cast<uint8_t>(value);
-}
-
-void put32(uint8_t* at, uint32_t value) {
-  put16(at, static_cast<uint16_t>(value >> 16));
-  put16(at + 2, static_cast<uint16_t>(value));
-}
-
-uint16_t get16(const uint8_t* at) { return static_cast<uint16_t>((at[0] << 8) | at[1]); }
-
-uint32_t get32(const uint8_t* at) {
-  return (static_cast<uint32_t>(get16(at)) << 16) | get16(at + 2);
-}
 
 // Fletcher-16: enough to tell a whole record from a torn or faded one.
 uint16_t checkOf(const uint8_t* data, size_t length) {

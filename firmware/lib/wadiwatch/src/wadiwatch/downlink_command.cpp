@@ -2,11 +2,12 @@
 
 #include <cstring>
 
+#include "wadiwatch/gateway_contract.h"
+
 namespace wadiwatch {
 
 namespace {
 
-constexpr uint32_t kContractVersion = 1;
 const char kAllClearKind[] = "all_clear";
 constexpr uint32_t kMaxWadiId = 255;
 constexpr uint32_t kMaxUint32 = 0xFFFFFFFFu;
