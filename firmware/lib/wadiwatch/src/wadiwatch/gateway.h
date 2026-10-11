@@ -95,10 +95,15 @@ class Gateway {
   //
   // An alert that raises a node's alert level is never the old alert. It always
   // starts or escalates an event, it is never answered with an all clear, and an
-  // all clear still held for that node is dropped.
+  // all clear still held for that node is dropped. The same goes for an alert
+  // refresh at a higher alert level than the all clear ended: the gateway missed
+  // the alert that raised it.
   struct WadiNodeAllClear {
     // The alert level the node last showed, in an alert or a reading.
     AlertLevel shown = AlertLevel::None;
+    // The alert level the all clear ended at the node: what the node showed when the
+    // command came or, for a gateway that had not heard of it, first showed after.
+    AlertLevel ended = AlertLevel::None;
     // The command the all clear belongs to.
     uint32_t command = 0;
     // An all clear naming the node is to be transmitted, at dueAtMs at the latest.

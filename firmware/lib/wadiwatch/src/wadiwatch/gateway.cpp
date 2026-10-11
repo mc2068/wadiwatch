@@ -243,6 +243,7 @@ void Gateway::handleAllClearCommand(const AllClearCommand& command, uint64_t now
     allClear.command = command.command;
     allClear.due = true;
     allClear.dueAtMs = nowMs + config_.allClearHoldMs;
+    allClear.ended = allClear.shown;
     allClear.awaited = allClear.shown != AlertLevel::None && config_.allClearMaxAnswers > 0;
     allClear.awaitedUntilMs = nowMs + config_.allClearAnswerPeriodMs;
     allClear.answersLeft = config_.allClearMaxAnswers;
@@ -270,22 +271,28 @@ bool Gateway::handleAwaitedPacket(WadiNodeAllClear& allClear, const Packet& pack
   if (packet.kind == PacketKind::Alert) allClear.shown = packet.alert.alertLevel;
   if (packet.kind == PacketKind::Reading) allClear.shown = packet.reading.alertLevel;
 
+  if (allClear.awaited && nowMs >= allClear.awaitedUntilMs) allClear.awaited = false;
+
   // An alert that raises the node's alert level is news whatever came before: the
   // node heard the all clear and the water has come back, or it restarted into a
   // flood, or it never heard and the flood has grown. It is never answered with an
   // all clear, and an all clear still held for the node is not transmitted. Only an
-  // alert refresh can be the old alert.
-  if (packet.kind == PacketKind::Alert && !packet.alert.refresh) {
-    allClear.awaited = false;
-    allClear.due = false;
-    return false;
+  // alert refresh can be the old alert, and only at an alert level the all clear
+  // ended: a refresh above that level comes from a node whose raise was not heard.
+  if (packet.kind == PacketKind::Alert) {
+    const bool raiseNotHeard = allClear.awaited && packet.alert.alertLevel > allClear.ended;
+    if (!packet.alert.refresh || raiseNotHeard) {
+      allClear.awaited = false;
+      allClear.due = false;
+      return false;
+    }
   }
 
-  if (allClear.awaited && nowMs >= allClear.awaitedUntilMs) allClear.awaited = false;
   // An all clear is still held for the node and the node shows an alert level: one it
   // held when the command came, which a gateway that restarted had not heard of.
   if (allClear.due && !allClear.awaited && allClear.shown != AlertLevel::None &&
       config_.allClearMaxAnswers > 0) {
+    allClear.ended = allClear.shown;
     allClear.awaited = true;
     allClear.awaitedUntilMs = nowMs + config_.allClearAnswerPeriodMs;
     allClear.answersLeft = config_.allClearMaxAnswers;

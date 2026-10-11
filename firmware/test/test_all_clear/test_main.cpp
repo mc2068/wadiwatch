@@ -197,6 +197,14 @@ std::vector<std::string> textsSentTo(const TestSite& site, const Recipient& reci
   return texts;
 }
 
+// The SMS a recipient should read when `wadi` reaches `alertLevel`.
+std::string alertText(const Recipient& recipient, const WadiConfig& wadi, AlertLevel alertLevel) {
+  char text[wadiwatch::kMaxSmsTextLength + 1];
+  const size_t length = wadiwatch::renderAlertSms(
+      recipient.language, alertLevel, wadiNameIn(wadi, recipient.language), text, sizeof(text));
+  return std::string(text, length);
+}
+
 size_t closingSmsCountTo(const TestSite& site, const Recipient& recipient) {
   size_t count = 0;
   const std::string closing = closingText(recipient, site.config.gateway.wadis[0]);
@@ -705,6 +713,83 @@ static void test_a_wadi_node_that_never_hears_is_answered_a_limited_number_of_ti
   TEST_ASSERT_TRUE(texts[2] == texts[0]);
 }
 
+// The gateway can miss the alert that raises a node's alert level and hear only the
+// alert refresh that follows. A refresh at a higher alert level than the all clear
+// ended is not the old alert.
+static void test_an_alert_refresh_above_the_alert_level_the_all_clear_ended_starts_a_new_event() {
+  TestSite site;
+  const Node node = upstreamNode(site);
+  const Recipient& official = recipient(site, 0);
+  const WadiConfig& wadi = site.config.gateway.wadis[0];
+  floodTo(site, node, AlertLevel::Warning);
+  letSmsGoOut(site);
+  waterRecedes(site);
+  // The node hears nothing the gateway transmits, so it stays at Warning and goes on
+  // sending its alert refresh, which the gateway answers.
+  site.air.dropNextFrom(site.gatewayRadio, 100000);
+  site.issueAllClear();
+  site.runMs(node.config.alertRefreshIntervalMs + kStepMs);
+  TEST_ASSERT_TRUE(allClearsFor(site, node).size() >= 1);
+
+  // The water comes back and reaches Evacuate. Interference swallows what the node
+  // transmits until the alert that raises its level has had all its transmissions.
+  site.air.dropNextFrom(node.radio, 100000);
+  node.levelSensor.setWaterLevelCm(levelWithin(node, AlertLevel::Evacuate));
+  for (uint64_t waited = 0; site.latestAlertOnAir(node.config.id) != AlertLevel::Evacuate;
+       waited += kStepMs) {
+    TEST_ASSERT_TRUE(waited < 2 * node.config.mode.stormMeasureIntervalMs);
+    site.runMs(kStepMs);
+  }
+  site.runMs(static_cast<uint64_t>(node.config.alertRepeat.transmissions) *
+             node.config.alertRepeat.maxSpacingMs);
+  site.air.stopDroppingFrom(node.radio);
+  const size_t allClearsBefore = allClearsFor(site, node).size();
+  TEST_ASSERT_TRUE_MESSAGE(allClearsBefore + 2 <= site.config.gateway.allClearMaxAnswers,
+                           "this scenario needs the gateway to have answers left");
+
+  // The next thing the gateway hears from the node is an alert refresh at Evacuate.
+  site.runMs(2 * node.config.alertRefreshIntervalMs);
+  letSmsGoOut(site);
+
+  // It is not answered with an all clear,
+  TEST_ASSERT_EQUAL_UINT(allClearsBefore, allClearsFor(site, node).size());
+  // and the people are told of Evacuate, as the start of a new event.
+  const std::vector<std::string> texts = textsSentTo(site, official);
+  TEST_ASSERT_EQUAL_UINT(3, texts.size());
+  TEST_ASSERT_TRUE(texts[0] == alertText(official, wadi, AlertLevel::Warning));
+  TEST_ASSERT_TRUE(texts[1] == closingText(official, wadi));
+  TEST_ASSERT_TRUE(texts[2] == alertText(official, wadi, AlertLevel::Evacuate));
+}
+
+// A gateway that restarted during the event has not heard of the alert its command
+// ends. The alert refresh it hears while it still holds the all clear is that alert.
+static void test_a_gateway_restarted_during_the_event_answers_the_alert_refresh_it_hears_while_holding_the_all_clear() {
+  TestSite site;
+  const Node node = upstreamNode(site);
+  const Recipient& official = recipient(site, 0);
+  floodTo(site, node, AlertLevel::Warning);
+  letSmsGoOut(site);
+  waterRecedes(site);
+  // The gateway restarts just after an alert refresh, and the command arrives before
+  // the next one.
+  const size_t alertsBefore = alertsFrom(site, node).size();
+  while (alertsFrom(site, node).size() == alertsBefore) site.runMs(kStepMs);
+  site.runMs(static_cast<uint64_t>(node.config.alertRepeat.transmissions) *
+             node.config.alertRepeat.maxSpacingMs);
+  site.restartGateway();
+
+  issueAllClearAndWait(site);
+  letSmsGoOut(site);
+
+  // The node heard the all clear in the answer window of its alert refresh.
+  TEST_ASSERT_EQUAL_UINT(1, allClearsFor(site, node).size());
+  ASSERT_ALERT_LEVEL(AlertLevel::None, readingsFrom(site, node).back().reading.alertLevel);
+  ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
+  // No new event was started for that refresh: nobody was told of Warning twice.
+  const std::vector<std::string> texts = textsSentTo(site, official);
+  TEST_ASSERT_EQUAL_UINT(1, texts.size());
+}
+
 static void test_the_gateway_s_airtime_stays_under_the_duty_cycle_limit_even_when_no_wadi_node_hears() {
   TestSite site;
   const Node nodes[] = {upstreamNode(site), downstreamNode(site)};
@@ -1183,6 +1268,8 @@ int main(int, char**) {
   RUN_TEST(test_an_all_clear_still_held_for_a_wadi_node_is_dropped_when_that_node_raises_its_alert_level);
   RUN_TEST(test_a_wadi_node_that_missed_the_all_clear_is_given_it_again_and_no_new_event_starts);
   RUN_TEST(test_a_wadi_node_that_never_hears_is_answered_a_limited_number_of_times_then_starts_a_new_event);
+  RUN_TEST(test_an_alert_refresh_above_the_alert_level_the_all_clear_ended_starts_a_new_event);
+  RUN_TEST(test_a_gateway_restarted_during_the_event_answers_the_alert_refresh_it_hears_while_holding_the_all_clear);
   RUN_TEST(test_the_gateway_s_airtime_stays_under_the_duty_cycle_limit_even_when_no_wadi_node_hears);
   RUN_TEST(test_a_wadi_node_at_watch_in_dry_mode_hears_the_all_clear_after_its_heartbeat);
   RUN_TEST(test_a_wadi_node_with_no_alert_never_switches_its_receiver_on);

@@ -316,6 +316,9 @@ class Air {
     framesToDropFrom_[&sender] += count;
   }
 
+  // The interference ends: what that radio transmits from now on arrives again.
+  void stopDroppingFrom(const InMemoryRadio& sender) { framesToDropFrom_.erase(&sender); }
+
   // Delivers a frame to every listening radio, as if sent by a transmitter outside the site.
   void inject(const Frame& frame) { deliver(frame, nullptr); }
 
