@@ -13,6 +13,13 @@ struct UpstreamConfig {
   NodeId node;
   // In storm mode the receiver is on for this long after each measurement.
   uint32_t receiveWindowMs;
+  // An alert heard from the upstream node is in force for this long after it was
+  // heard. An upstream node at Warning or above sends an alert refresh every
+  // interval, so one that has not been heard for several intervals has had its all
+  // clear, or is gone: its Warning must not confirm a Warning here in a later event.
+  // Nothing is lost by forgetting early: a node at Warning listens without a break,
+  // so it hears the next alert refresh within one interval.
+  uint32_t alertRefreshTimeoutMs;
 };
 
 // Keeps the upstream bookkeeping of one wadi node. Pure: the caller passes in the time,
@@ -35,12 +42,15 @@ class UpstreamLink {
   // When the current receive window ends. The node must be awake then to switch the receiver off.
   uint64_t windowEndsAtMs() const { return windowEndsAtMs_; }
 
-  // A packet the node's codec accepted. Only an alert sent by the upstream node counts.
-  void onPacket(const Packet& packet);
+  // A packet the node's codec accepted just now. Only an alert sent by the upstream
+  // node counts.
+  void onPacket(const Packet& packet, uint64_t nowMs);
 
-  // The last alert level heard from the upstream node; None when there is no upstream
-  // node, nothing has been heard from it, or its event has ended since.
-  AlertLevel alertLevel() const { return alertLevel_; }
+  // The alert level in force at the upstream node as far as this node knows: the last
+  // one heard from it, for as long as the configuration lets it stand without being
+  // heard again. None when there is no upstream node, nothing has been heard from it,
+  // its alert refresh has stopped arriving, or its event has ended since.
+  AlertLevel alertLevel(uint64_t nowMs) const;
 
   // The upstream node this link listens for, or kNoNode.
   NodeId node() const { return config_.node; }
@@ -52,6 +62,8 @@ class UpstreamLink {
   UpstreamConfig config_;
   uint64_t windowEndsAtMs_ = 0;
   AlertLevel alertLevel_ = AlertLevel::None;
+  // When alertLevel_ was last heard.
+  uint64_t heardAtMs_ = 0;
 };
 
 }  // namespace wadiwatch

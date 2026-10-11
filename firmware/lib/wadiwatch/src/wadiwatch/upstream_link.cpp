@@ -16,11 +16,17 @@ bool UpstreamLink::wantsReceiver(uint64_t nowMs, OperatingMode mode, AlertLevel 
   return nowMs < windowEndsAtMs_;
 }
 
-void UpstreamLink::onPacket(const Packet& packet) {
+void UpstreamLink::onPacket(const Packet& packet, uint64_t nowMs) {
   if (config_.node == kNoNode) return;
   if (packet.sender != config_.node) return;
   if (packet.kind != PacketKind::Alert) return;
   alertLevel_ = packet.alert.alertLevel;
+  heardAtMs_ = nowMs;
+}
+
+AlertLevel UpstreamLink::alertLevel(uint64_t nowMs) const {
+  if (nowMs - heardAtMs_ > config_.alertRefreshTimeoutMs) return AlertLevel::None;
+  return alertLevel_;
 }
 
 }  // namespace wadiwatch

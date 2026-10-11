@@ -5,6 +5,11 @@
 // its alert again, forgets what it heard from its upstream node and, once the
 // quiet period has passed, goes back to dry mode. If the water still calls for an
 // alert, the node raises it again at once, as a new one.
+//
+// What the node heard from its upstream node also lapses by itself, when the
+// upstream node's alert refresh has not been heard for several intervals
+// (UpstreamConfig::alertRefreshTimeoutMs): a node that sleeps through the all clear
+// does not carry the upstream Warning into the next event.
 #pragma once
 
 #include <cstdint>
@@ -46,7 +51,7 @@ class WadiNode {
   void measure(uint64_t nowMs);
   void handleReceivedFrames(uint64_t nowMs);
   void handleAllClear(const Packet& allClear, uint64_t nowMs);
-  bool holdsWhatAnAllClearEnds() const;
+  bool holdsWhatAnAllClearEnds(uint64_t nowMs) const;
   void raiseAlertLevel(uint64_t nowMs);
   bool hasAlertToRefresh() const;
   void announceAlert(uint64_t nowMs, bool refresh);

@@ -471,6 +471,100 @@ static void test_without_an_upstream_relationship_warning_at_both_nodes_stays_wa
   ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
 }
 
+// --- A Warning remembered from upstream does not outlive its event ---
+
+// The downstream node, in storm mode on a bed below Watch, has heard the upstream
+// node's Warning in its receive windows and holds no alert level of its own.
+void downstreamNodeHearsTheUpstreamWarning(TestSite& site) {
+  const Node upstream = upstreamNode(site);
+  const Node downstream = downstreamNode(site);
+  holdLevel(site, upstream, levelWithin(upstream, AlertLevel::Warning));
+  downstream.levelSensor.setWaterLevelCm(levelBelowWatch(downstream));
+  rainStartsDownstreamJustBeforeAnUpstreamAlertRefresh(site);
+  site.runMs(2ull * downstream.config.mode.stormMeasureIntervalMs);
+  TEST_ASSERT_EQUAL_UINT(0, alertsFrom(site, downstream).size());
+}
+
+static void test_an_upstream_warning_whose_alert_refresh_has_stopped_does_not_confirm_a_later_warning() {
+  TestSite site;
+  const Node downstream = downstreamNode(site);
+  downstreamNodeHearsTheUpstreamWarning(site);
+
+  // The upstream node falls silent: its event has ended in a way the downstream node
+  // never hears of. Several alert refreshes are missed.
+  site.unplugWadiNode();
+  site.runMs(downstream.config.upstream.alertRefreshTimeoutMs + kStepMs);
+
+  // The water then rises at the downstream node alone.
+  holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
+  site.runMs(3ull * downstream.config.alertRefreshIntervalMs);
+
+  const std::vector<Packet> alerts = alertsFrom(site, downstream);
+  TEST_ASSERT_FALSE(alerts.empty());
+  for (const Packet& alert : alerts) {
+    ASSERT_ALERT_LEVEL(AlertLevel::Warning, alert.alert.alertLevel);
+  }
+  ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
+}
+
+static void test_an_upstream_warning_still_counts_while_fewer_alert_refreshes_have_been_missed() {
+  TestSite site;
+  const Node downstream = downstreamNode(site);
+  const uint64_t timeoutMs = downstream.config.upstream.alertRefreshTimeoutMs;
+  const uint64_t measureIntervalMs = downstream.config.mode.stormMeasureIntervalMs;
+  TEST_ASSERT_TRUE_MESSAGE(timeoutMs > 3 * measureIntervalMs,
+                           "this scenario needs a timeout of several measurements");
+  downstreamNodeHearsTheUpstreamWarning(site);
+
+  // The upstream node is not heard for a while, though not for the whole timeout.
+  site.unplugWadiNode();
+  site.runMs(timeoutMs - 3 * measureIntervalMs);
+
+  // The flood arrives: Warning here with the Warning remembered from upstream.
+  holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
+
+  const std::vector<Packet> alerts = alertsFrom(site, downstream);
+  TEST_ASSERT_EQUAL_UINT(1, alerts.size());
+  ASSERT_ALERT_LEVEL(AlertLevel::Evacuate, alerts[0].alert.alertLevel);
+}
+
+// The case of a downstream node that sleeps through the all clear: it heard the
+// upstream Warning in storm mode, raised no alert of its own, and is back in dry mode
+// with its receiver off when the officer ends the event.
+static void test_a_downstream_node_that_never_hears_the_all_clear_does_not_carry_the_upstream_warning_into_the_next_event() {
+  TestSite site;
+  const Node upstream = upstreamNode(site);
+  const Node downstream = downstreamNode(site);
+  downstreamNodeHearsTheUpstreamWarning(site);
+
+  // The rain stops; the downstream node goes back to dry mode while the upstream
+  // node is still at Warning.
+  site.runMs(downstream.config.mode.stormQuietMs + 2ull * downstream.config.mode.stormMeasureIntervalMs);
+  TEST_ASSERT_FALSE(downstream.radio.isListening());
+
+  // The flood passes and an officer issues the all clear. The downstream node sends
+  // nothing while it goes out, so it has no answer window open and hears none of it.
+  upstream.levelSensor.setWaterLevelCm(levelBelowWatch(upstream));
+  site.runMs(2ull * upstream.config.mode.stormMeasureIntervalMs);
+  const size_t sentByDownstream = downstream.radio.sent().size();
+  site.issueAllClear();
+  site.runMs(site.allClearSettleMs());
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(sentByDownstream, downstream.radio.sent().size(),
+                                 "this scenario needs the downstream node silent meanwhile");
+  ASSERT_SIREN_SOUND(SirenSound::Silent, site.listenToSiren());
+
+  // The next event: the water rises at the downstream node only.
+  holdLevel(site, downstream, levelWithin(downstream, AlertLevel::Warning));
+  site.runMs(3ull * downstream.config.alertRefreshIntervalMs);
+
+  const std::vector<Packet> alerts = alertsFrom(site, downstream);
+  TEST_ASSERT_FALSE(alerts.empty());
+  for (const Packet& alert : alerts) {
+    ASSERT_ALERT_LEVEL(AlertLevel::Warning, alert.alert.alertLevel);
+  }
+  ASSERT_SIREN_SOUND(SirenSound::Intermittent, site.listenToSiren());
+}
+
 // --- The alert refresh ---
 
 // At `alertLevel`, the node sends its alert once per alert refresh interval, on the interval.
@@ -808,6 +902,9 @@ int main(int, char**) {
   RUN_TEST(test_warning_at_the_downstream_node_does_not_raise_evacuate_at_the_upstream_node);
   RUN_TEST(test_which_node_is_upstream_of_which_comes_from_the_site_configuration);
   RUN_TEST(test_without_an_upstream_relationship_warning_at_both_nodes_stays_warning);
+  RUN_TEST(test_an_upstream_warning_whose_alert_refresh_has_stopped_does_not_confirm_a_later_warning);
+  RUN_TEST(test_an_upstream_warning_still_counts_while_fewer_alert_refreshes_have_been_missed);
+  RUN_TEST(test_a_downstream_node_that_never_hears_the_all_clear_does_not_carry_the_upstream_warning_into_the_next_event);
   RUN_TEST(test_a_node_at_warning_refreshes_its_alert_every_refresh_interval);
   RUN_TEST(test_a_node_at_evacuate_refreshes_its_alert_every_refresh_interval);
   RUN_TEST(test_a_node_at_watch_does_not_send_its_alert_again);

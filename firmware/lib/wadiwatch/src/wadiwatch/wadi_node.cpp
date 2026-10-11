@@ -172,7 +172,7 @@ void WadiNode::handleReceivedFrames(uint64_t nowMs) {
     if (packet.kind == PacketKind::AllClear) {
       handleAllClear(packet, nowMs);
     } else {
-      upstream_.onPacket(packet);
+      upstream_.onPacket(packet, nowMs);
     }
   }
 }
@@ -203,8 +203,8 @@ void WadiNode::handleAllClear(const Packet& allClear, uint64_t nowMs) {
 
 // Whether this node has anything an all clear would end. Only then is the answer
 // window worth its energy: on a dry day the receiver stays off.
-bool WadiNode::holdsWhatAnAllClearEnds() const {
-  return alertLevel_ != AlertLevel::None || upstream_.alertLevel() != AlertLevel::None;
+bool WadiNode::holdsWhatAnAllClearEnds(uint64_t nowMs) const {
+  return alertLevel_ != AlertLevel::None || upstream_.alertLevel(nowMs) != AlertLevel::None;
 }
 
 // The alert engine decides; this keeps the highest alert level it has called for.
@@ -214,7 +214,7 @@ void WadiNode::raiseAlertLevel(uint64_t nowMs) {
   const float sustainedRateOfRiseCmPerMin =
       rise_.sustainedRateCmPerMin(config_.alertThresholds.warningRateOfRiseSustainMs);
   const AlertInputs inputs = {levelCm_, sustainedRateOfRiseCmPerMin, rain_.rainMm(nowMs),
-                              upstream_.alertLevel(), alertLevel_};
+                              upstream_.alertLevel(nowMs), alertLevel_};
   const AlertLevel evaluated = evaluateAlertLevel(inputs, config_.alertThresholds);
   if (evaluated <= alertLevel_) return;
   alertLevel_ = evaluated;
@@ -324,9 +324,8 @@ size_t WadiNode::send(Packet& packet, uint8_t* frame, size_t capacity) {
 void WadiNode::transmit(const uint8_t* frame, size_t length) {
   if (length == 0) return;
   radio_.send(frame, length);
-  if (holdsWhatAnAllClearEnds()) {
-    answerWindowEndsAtMs_ = clock_.nowMs() + config_.answerWindowMs;
-  }
+  const uint64_t nowMs = clock_.nowMs();
+  if (holdsWhatAnAllClearEnds(nowMs)) answerWindowEndsAtMs_ = nowMs + config_.answerWindowMs;
 }
 
 void WadiNode::sleepUntilNextDue(uint64_t nowMs) {

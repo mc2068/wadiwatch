@@ -89,6 +89,8 @@ SiteConfig makePrototypeSite() {
           /* upstream */ {
               /* node */ kNoNode,
               /* receiveWindowMs */ 3000u,
+              // Five alert refresh intervals.
+              /* alertRefreshTimeoutMs */ 5u * kMinuteMs,
           },
           /* alertRefreshIntervalMs */ 1u * kMinuteMs,
           /* answerWindowMs */ 2000u,
